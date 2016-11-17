@@ -19,13 +19,13 @@ package raft
 
 import (
 	"sync"
+	"labrpc"
 	"time"
 	"math/rand"
 	"fmt"
 	"sort"
 	"bytes"
 	"encoding/gob"
-	"io/ioutil"
 )
 
 //
@@ -45,8 +45,8 @@ type ApplyMsg struct {
 //
 type Raft struct {
 	mu        sync.Mutex
-	peers     []*UnreliableRpcClient
-	stateFilePath string
+	peers     []*labrpc.ClientEnd
+	persister *Persister
 	me        int // index into peers[]
 
 	// Your data here.
@@ -118,7 +118,7 @@ const MinElectionTimeout = time.Millisecond * 120
 const HeartbeatTimeout = time.Millisecond * 50
 
 // 0: no logs, 1: commits and leader changes, 2: all state changes, 3: all messages, 4: all logs
-const Verbosity = 2
+const Verbosity = 0
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -141,29 +141,20 @@ func (rf *Raft) persist() {
 		panic(fmt.Sprintf("Raft.persist: Encoding failed: %v", err))
 	}
 
-	err = ioutil.WriteFile(rf.stateFilePath, buffer.Bytes(), 0644)
-	if err != nil {
-		fmt.Printf("Error: failed to write RAFT state to '%s'\n", rf.stateFilePath)
-	}
+	rf.persister.SaveRaftState(buffer.Bytes())
 }
 
 //
 // restore previously persisted state.
 //
-func (rf *Raft) restoreState(path string) {
+func (rf *Raft) readPersist(data []byte) {
 	var persistentData RaftPersistentData
-
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		fmt.Printf("Warning: failed to open RAFT state at '%v'\n")
-	}
 
 	buffer := bytes.NewBuffer(data)
 	decoder := gob.NewDecoder(buffer)
-	err = decoder.Decode(&persistentData)
+	err := decoder.Decode(&persistentData)
 	if err != nil {
 		// use defaults
-		fmt.Printf("Using default RAFT state\n")
 		persistentData.CurrentTerm = 0
 		persistentData.VotedFor = -1
 		persistentData.Log = make([]Log, 0)
@@ -199,14 +190,13 @@ type RequestVoteResponse struct {
 	reply *RequestVoteReply
 }
 
-func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	if Verbosity >= 4 {
 		fmt.Printf("%v: RequestVote from %v (term: %v)\n", rf.me, args.CandidateId, args.Term)
 	}
 	done := make(chan bool)
 	rf.requestVoteRequests <- RequestVoteRequestData{&args, reply, done}
 	<-done
-	return nil
 }
 
 func (rf *Raft) handleRequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -301,14 +291,13 @@ type AppendEntriesResponse struct {
 	reply *AppendEntriesReply
 }
 
-func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	if Verbosity >= 4 {
 		fmt.Printf("%v: AppendEntries from %v (term: %v)\n", rf.me, args.LeaderId, args.Term)
 	}
 	done := make(chan bool)
 	rf.appendEntriesRequests <- AppendEntriesRequestData{&args, reply, done}
 	<-done
-	return nil
 }
 
 func (rf *Raft) handleAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -428,28 +417,28 @@ func (rf *Raft) handleAppendEntriesResponse(response *AppendEntriesResponse) {
 			if response.reply.Term > rf.currentTerm {
 				rf.becomeFollower(response.reply.Term, false)
 			} else {
-				rf.nextIndex[response.server] = maxInt(rf.nextIndex[response.server] - 1, 0)
+				//nextIndex := maxInt(rf.nextIndex[response.server] - 1, 0)
 				// instead of above line, use the backtracking optimization below
 				// NOTE: this has a bug that only occurs in some of the harder tests (figure 8 unreliable and churn), and only about 20% of the time for a given "go test" execution
 				// on the other hand, the above code works 100% of the time, but always fails the harder tests due to the tests timing out
-				//if response.reply.ConflictTerm == -1 {
-					//// move nextIndex to the end of their log
-					//rf.nextIndex[response.server] = response.reply.ConflictTermFirstIndex
-				//} else {
-					//// search back until we find the term, or get to a term with a lower value
+				if response.reply.ConflictTerm == -1 {
+					// move nextIndex to the end of their log
+					rf.nextIndex[response.server] = response.reply.ConflictTermFirstIndex
+				} else {
+					// search back until we find the term, or get to a term with a lower value
 
-					//// in case we don't find anything, set to the ConflictTermFirstIndex
-					//rf.nextIndex[response.server] = response.reply.ConflictTermFirstIndex
-					//for i := len(rf.log)-1; i >= 0; i-- {
-						////fmt.Printf("index %v, len %v\n", i, len(rf.log))
-						//if rf.log[i].Term <= response.reply.ConflictTerm {
-							//if rf.log[i].Term == response.reply.ConflictTerm {
-								//rf.nextIndex[response.server] = i + 1
-							//}
-							//break
-						//}
-					//}
-				//}
+					// in case we don't find anything, set to the ConflictTermFirstIndex
+					rf.nextIndex[response.server] = response.reply.ConflictTermFirstIndex
+					for i := len(rf.log)-1; i >= 0; i-- {
+						//fmt.Printf("index %v, len %v\n", i, len(rf.log))
+						if rf.log[i].Term <= response.reply.ConflictTerm {
+							if rf.log[i].Term == response.reply.ConflictTerm {
+								rf.nextIndex[response.server] = i + 1
+							}
+							break
+						}
+					}
+				}
 			}
 		}
 	}
@@ -525,25 +514,20 @@ func (rf *Raft) Kill() {
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
 //
-func MakeRaft(peerAddresses []string, me int,
-	stateFilePath string, applyCh chan ApplyMsg) *Raft {
+func Make(peers []*labrpc.ClientEnd, me int,
+	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
-	rf.peers = make([]*UnreliableRpcClient, len(peerAddresses))
-	for index, address := range peerAddresses {
-		if index != me {
-			rf.peers[index] = NewUnreliableRpcClient(address, 5, time.Second)
-		}
-	}
+	rf.peers = peers
+	rf.persister = persister
 	rf.me = me
 	rf.applyCh = applyCh
-	rf.stateFilePath = stateFilePath
 
 	// volatile RAFT variables
 	rf.commitIndex = -1
 	rf.lastApplied = -1
 
-	rf.nextIndex = make([]int, len(rf.peers))
-	rf.matchIndex = make([]int, len(rf.peers))
+	rf.nextIndex = make([]int, len(peers))
+	rf.matchIndex = make([]int, len(peers))
 
 	// volatile non-RAFT variables
 	rf.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -551,7 +535,7 @@ func MakeRaft(peerAddresses []string, me int,
 	rf.electionTimer = time.NewTimer(MinElectionTimeout*2)
 	rf.heartbeatTimer = time.NewTimer(HeartbeatTimeout)
 	rf.ResetElectionTimer()
-	rf.receivedVote = make([]bool, len(rf.peers))
+	rf.receivedVote = make([]bool, len(peers))
 
 	rf.requestVoteRequests = make(chan RequestVoteRequestData)
 	rf.appendEntriesRequests = make(chan AppendEntriesRequestData)
@@ -562,7 +546,7 @@ func MakeRaft(peerAddresses []string, me int,
 	rf.startRequests = make(chan StartRequestData)
 
 	// initialize from state persisted before a crash
-	rf.restoreState(rf.stateFilePath)
+	rf.readPersist(persister.ReadRaftState())
 
 	// start the main loop
 	go rf.Run()

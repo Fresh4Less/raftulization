@@ -8,26 +8,23 @@ import (
 	"net/rpc"
 	"log"
 	"strconv"
-	"time"
+	"github.com/fresh4less/raftulization/raft"
+	"os"
+	"path"
 )
-
-type TestRaft struct {
-	State string
-}
-
-func (tr *TestRaft) SayHello(name string, reply *string) error {
-	*reply = fmt.Sprintf("Hello %v, I'm %v", name, tr.State)
-	return nil
-}
 
 func main() {
 
 	var serverPort = flag.Int("s", 8080, "listen port")
 	var clientPort = flag.Int("c", 8081, "connect port")
+	var raftStatePath = flag.String("f", path.Join(os.TempDir(), "raftState.state"), "raft save state file path")
 	flag.Parse()
 	// server
-	tr := TestRaft{"follower"}
-	rpc.Register(&tr)
+	peers := []string{"", "127.0.0.1:" + strconv.Itoa(*clientPort)}
+	applyCh := make(chan raft.ApplyMsg)
+	rf := raft.MakeRaft(peers, 0, *raftStatePath, applyCh)
+
+	rpc.Register(rf)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":" + strconv.Itoa(*serverPort))
 	if e != nil {
@@ -36,22 +33,6 @@ func main() {
 	fmt.Printf("Listening on %v\n", serverPort)
 
 	go http.Serve(l, nil)
-
-	time.Sleep(time.Second * 2)
-
-	// client
-	client, err := rpc.DialHTTP("tcp", ":" + strconv.Itoa(*clientPort))
-	if err != nil {
-		log.Fatal("dialing:", err)
-	}
-	fmt.Printf("Connected to %v\n", clientPort)
-
-	name := "elliot"
-	res := ""
-	err = client.Call("TestRaft.SayHello", name, &res)
-	if err != nil {
-		log.Fatal("say hello error:", err)
-	}
-	fmt.Printf("Response: %v\n", res)
+	select{}
 }
 
