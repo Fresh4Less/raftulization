@@ -82,6 +82,7 @@ type Raft struct {
 	appendEntriesResponses chan AppendEntriesResponse
 
 	startRequests chan StartRequestData
+	Verbosity int
 }
 
 type StartRequestData struct {
@@ -116,9 +117,6 @@ type Log struct {
 
 const MinElectionTimeout = time.Millisecond * 120
 const HeartbeatTimeout = time.Millisecond * 50
-
-// 0: no logs, 1: commits and leader changes, 2: all state changes, 3: all messages, 4: all logs
-const Verbosity = 2
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -200,7 +198,7 @@ type RequestVoteResponse struct {
 }
 
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
-	if Verbosity >= 4 {
+	if rf.Verbosity >= 4 {
 		fmt.Printf("%v: RequestVote from %v (term: %v)\n", rf.me, args.CandidateId, args.Term)
 	}
 	done := make(chan bool)
@@ -210,7 +208,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
 }
 
 func (rf *Raft) handleRequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	if Verbosity >= 3 {
+	if rf.Verbosity >= 3 {
 		fmt.Printf("%v: Handling RequestVote from %v (term: %v)\n", rf.me, args.CandidateId, args.Term)
 	}
 
@@ -237,7 +235,7 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, reply *RequestVoteReply
 
 // return value is true if a vote was granted
 func (rf *Raft) handleRequestVoteResponse(response *RequestVoteResponse) bool {
-	if Verbosity >= 3 {
+	if rf.Verbosity >= 3 {
 		fmt.Printf("%v: Handling RequestVote response from %v (success: %v, granted: %v, term: %v)\n",
 			rf.me, response.server, response.success, response.reply.VoteGranted, response.reply.Term)
 	}
@@ -266,7 +264,7 @@ func (rf *Raft) handleRequestVoteResponse(response *RequestVoteResponse) bool {
 func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs) {
 	var reply RequestVoteReply
 	success := rf.peers[server].Call("Raft.RequestVote", args, &reply)
-	if Verbosity >= 4 {
+	if rf.Verbosity >= 4 {
 		fmt.Printf("%v: RequestVote response from %v (success: %v, granted: %v, term: %v)\n", rf.me, server, success, reply.VoteGranted, reply.Term)
 		}
 	rf.requestVoteResponses <- RequestVoteResponse{server, args, success, &reply}
@@ -302,7 +300,7 @@ type AppendEntriesResponse struct {
 }
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
-	if Verbosity >= 4 {
+	if rf.Verbosity >= 4 {
 		fmt.Printf("%v: AppendEntries from %v (term: %v)\n", rf.me, args.LeaderId, args.Term)
 	}
 	done := make(chan bool)
@@ -312,7 +310,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 }
 
 func (rf *Raft) handleAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	if Verbosity >= 3 {
+	if rf.Verbosity >= 3 {
 		fmt.Printf("%v: Handling AppendEntries from %v (term: %v, prevLogIndex: %v, prevLogTerm: %v, entries: %v, leaderCommit: %v)\n",
 			rf.me, args.LeaderId, args.Term, args.PrevLogIndex, args.PrevLogTerm, len(args.Entries), args.LeaderCommit)
 	}
@@ -381,7 +379,7 @@ func (rf *Raft) handleAppendEntries(args *AppendEntriesArgs, reply *AppendEntrie
 }
 
 func (rf *Raft) handleAppendEntriesResponse(response *AppendEntriesResponse) {
-	if Verbosity >= 3 {
+	if rf.Verbosity >= 3 {
 		fmt.Printf("%v: Handling AppendEntries response from %v (success: %v, appendSuccess: %v, term: %v)\n",
 			rf.me, response.server, response.success, response.reply.Success, response.reply.Term)
 	}
@@ -460,7 +458,7 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, lastLogInd
 	success := rf.peers[server].Call("Raft.AppendEntries", args, &reply)
 
 	rf.appendEntriesResponses <- AppendEntriesResponse{server, lastLogIndex, success, &reply}
-	if Verbosity >= 4 {
+	if rf.Verbosity >= 4 {
 		fmt.Printf("%v: AppendEntries response from %v (success: %v, term: %v)\n", rf.me, server, success, reply.Term)
 	}
 }
@@ -495,7 +493,7 @@ func maxInt(x, y int) int {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	if Verbosity >= 1 {
+	if rf.Verbosity >= 1 {
 		fmt.Printf("%v: Command submitted: %v\n", rf.me, command)
 	}
 	done := make(chan StartResponse)
@@ -526,7 +524,7 @@ func (rf *Raft) Kill() {
 // for any long-running work.
 //
 func MakeRaft(peerAddresses []string, me int,
-	stateFilePath string, applyCh chan ApplyMsg) *Raft {
+	stateFilePath string, applyCh chan ApplyMsg, verbosity int) *Raft {
 	rf := &Raft{}
 	rf.peers = make([]*UnreliableRpcClient, len(peerAddresses))
 	for index, address := range peerAddresses {
@@ -560,6 +558,7 @@ func MakeRaft(peerAddresses []string, me int,
 	rf.appendEntriesResponses = make(chan AppendEntriesResponse)
 	
 	rf.startRequests = make(chan StartRequestData)
+	rf.Verbosity = verbosity
 
 	// initialize from state persisted before a crash
 	rf.restoreState(rf.stateFilePath)
@@ -641,7 +640,7 @@ func (rf *Raft) Run() {
 //   RequestVote Response has higher term
 //   AppendEntries has higher term
 func (rf *Raft) becomeFollower(term int, keepVotedFor bool) {
-	if Verbosity >= 2 && (rf.serverState != Follower || rf.currentTerm != term) {
+	if rf.Verbosity >= 2 && (rf.serverState != Follower || rf.currentTerm != term) {
 		fmt.Printf("%v: Becoming Follower (keepVotedFor: %v)\n\tTerm: %v\n",
 			rf.me, keepVotedFor, term)
 	}
@@ -656,7 +655,7 @@ func (rf *Raft) becomeFollower(term int, keepVotedFor bool) {
 }
 
 func (rf *Raft) becomeLeader() {
-	if Verbosity >= 1 {
+	if rf.Verbosity >= 1 {
 		fmt.Printf("%v: Becoming Leader\n\tTerm: %v\n", rf.me, rf.currentTerm)
 	}
 
@@ -676,7 +675,7 @@ func (rf *Raft) becomeLeader() {
 }
 
 func (rf *Raft) becomeCandidate() {
-	if Verbosity >= 2 {
+	if rf.Verbosity >= 2 {
 		fmt.Printf("%v: Becoming Candidate\n\tNew term: %v\n", rf.me, rf.currentTerm + 1)
 	}
 
@@ -707,7 +706,7 @@ func (rf *Raft) becomeCandidate() {
 }
 
 func (rf *Raft) sendAppendEntriesToAll() {
-	if Verbosity >= 3 {
+	if rf.Verbosity >= 3 {
 		fmt.Printf("%v: Sending AppendEntries (lastLogIndex: %v)\n", rf.me, rf.lastLogIndex())
 	}
 	rf.ResetHeartbeatTimer()
@@ -740,7 +739,7 @@ func (rf *Raft) sendAppendEntriesToAll() {
 // applies logs from lastApplied up to and including index
 func (rf *Raft) applyLogs() {
 	for rf.lastApplied < rf.commitIndex {
-		if Verbosity >= 1 {
+		if rf.Verbosity >= 1 {
 			fmt.Printf("%v: Applying log index %v (term: %v, command %v)\n", rf.me, rf.lastApplied + 1, rf.log[rf.lastApplied + 1].Term, rf.log[rf.lastApplied + 1].Command)
 		}
 
