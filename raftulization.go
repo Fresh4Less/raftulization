@@ -1,18 +1,19 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"flag"
+	"fmt"
+	"github.com/fresh4less/raftulization/raft"
+	"log"
 	"net"
 	"net/http"
 	"net/rpc"
-	"log"
-	"strings"
-	"strconv"
-	"github.com/fresh4less/raftulization/raft"
+	"time"
 	"os"
 	"path"
-	"errors"
+	"strconv"
+	"strings"
 )
 
 type IpAddressList []string
@@ -31,6 +32,108 @@ func (ips *IpAddressList) Set(value string) error {
 	}
 	return nil
 }
+
+func main() {
+	if len(os.Args) <= 1 {
+		fmt.Printf("usage: raftulization raft|intercept [options]\n")
+		os.Exit(1)
+	}
+
+	switch os.Args[1] {
+	case "raft":
+		doRaft()
+	case "intercept":
+		doIntercept()
+	default:
+		fmt.Printf("usage: raftulization raft|intercept [options]\n")
+		os.Exit(1)
+	}
+}
+
+func doRaft() {
+	raftFlagSet := flag.NewFlagSet("", flag.ExitOnError)
+
+	serverPort := raftFlagSet.Int("s", 8080, "listen port")
+	eventAddress := raftFlagSet.String("e", "127.0.0.1:10000", "raft interceptor event address")
+	verbosity := raftFlagSet.Int("v", 2, "verbosity--0: no logs, 1: commits and leader changes, 2: all state changes, 3: all messages, 4: all logs")
+	peerAddresses := IpAddressList{}
+	raftFlagSet.Var(&peerAddresses, "c", "comma separated list of peer network addresses")
+
+	var raftStatePath = raftFlagSet.String("f", path.Join(os.TempDir(), "raftState.state"), "raft save state file path")
+	fmt.Printf("Saving state at %v\n", *raftStatePath)
+
+	raftFlagSet.Parse(os.Args[2:])
+	// server
+	// add myself to peers
+	peerAddresses = append(peerAddresses, ":"+strconv.Itoa(*serverPort))
+	applyCh := make(chan raft.ApplyMsg)
+	eventCh := make(chan raft.RaftEvent)
+	rf := raft.MakeRaft(peerAddresses, len(peerAddresses)-1, *raftStatePath, applyCh, *verbosity, eventCh)
+
+	rpc.Register(rf)
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", ":"+strconv.Itoa(*serverPort))
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	fmt.Printf("Listening on %v\n", *serverPort)
+
+	go http.Serve(l, nil)
+
+	eventClient := raft.NewUnreliableRpcClient(*eventAddress, 5, time.Second)
+
+	for(true) {
+		select {
+			case applyMsg := <-applyCh:
+				go func() {
+					eventCh<-raft.EntryCommittedEvent{applyMsg}
+				}()
+			case event := <-eventCh:
+				go func() {
+					eventClient.Call("Interceptor.OnEvent", &event, nil)
+				}()
+		}
+	}
+}
+
+type NetForwardInfoList []NetForwardInfo
+
+func (infoList *NetForwardInfoList) String() string {
+	return fmt.Sprint(*infoList)
+}
+
+func (infoList *NetForwardInfoList) Set(value string) error {
+	if len(*infoList) > 0 {
+		return errors.New("NetForwardInfoList flag already set")
+	}
+	for _, info := range strings.Split(value, ",") {
+		parts := strings.Split(info, "~")
+		sourceListenPort, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return err
+		}
+		remoteListenPort, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return err
+		}
+		//TODO: check if valid network address
+		*infoList = append(*infoList, NetForwardInfo{sourceListenPort, remoteListenPort, parts[2]})
+	}
+	return nil
+}
+
+func doIntercept() {
+	interceptFlagSet := flag.NewFlagSet("", flag.ExitOnError)
+	eventListenPort := interceptFlagSet.Int("e", 10000, "Event listen port")
+	sourceAddress := interceptFlagSet.String("s", "127.0.0.1:8000", "RAFT source address")
+
+	forwardInfo := NetForwardInfoList{}
+	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
+	interceptFlagSet.Parse(os.Args[2:])
+	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo)
+	select {}
+}
+
 /*
 Port convention--90ab: a=senderId, b=recipientId
 1.1.1.1
@@ -74,94 +177,8 @@ local testing version (instead of different Ips, different different 800x digit
 .\raftulization.exe raft -s 8083 -c 127.0.0.1:8080,127.0.0.1:8081,127.0.0.1:8082 -f r4.state
 
 .\raftulization.exe intercept -e 10001 -s 127.0.0.1:8001 -f 9012~9021~127.0.0.1:8002
-.\raftulization.exe raft -s 8001 -c 127.0.0.1:9012 -f r1.state
+.\raftulization.exe raft -s 8001 -e 127.0.0.1:10001 -c 127.0.0.1:9012 -f r1.state
 
 .\raftulization.exe raft -s 8002 -c 127.0.0.1:9021 -f r2.state
 3
 */
-
-func main() {
-	if len(os.Args) <= 1 {
-		fmt.Printf("usage: raftulization raft|intercept [options]\n")
-		os.Exit(1)
-	}
-
-	switch(os.Args[1]) {
-	case "raft":
-		doRaft()
-	case "intercept":
-		doIntercept()
-	default:
-		fmt.Printf("usage: raftulization raft|intercept [options]\n")
-		os.Exit(1)
-	}
-}
-
-func doRaft() {
-	raftFlagSet := flag.NewFlagSet("",flag.ExitOnError)
-
-	serverPort := raftFlagSet.Int("s", 8080, "listen port")
-	verbosity := raftFlagSet.Int("v", 2, "verbosity--0: no logs, 1: commits and leader changes, 2: all state changes, 3: all messages, 4: all logs")
-	peerAddresses := IpAddressList{}
-	raftFlagSet.Var(&peerAddresses, "c", "comma separated list of peer network addresses")
-
-	var raftStatePath = raftFlagSet.String("f", path.Join(os.TempDir(), "raftState.state"), "raft save state file path")
-	fmt.Printf("Saving state at %v\n", *raftStatePath)
-
-	raftFlagSet.Parse(os.Args[2:])
-	// server
-	// add myself to peers
-	peerAddresses = append(peerAddresses, ":" + strconv.Itoa(*serverPort))
-	applyCh := make(chan raft.ApplyMsg)
-	rf := raft.MakeRaft(peerAddresses, len(peerAddresses)-1, *raftStatePath, applyCh, *verbosity)
-
-	rpc.Register(rf)
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":" + strconv.Itoa(*serverPort))
-	if e != nil {
-		log.Fatal("listen error:" , e)
-	}
-	fmt.Printf("Listening on %v\n", *serverPort)
-
-	go http.Serve(l, nil)
-	select{}
-}
-
-type NetForwardInfoList []NetForwardInfo
-
-func (infoList *NetForwardInfoList) String() string {
-	return fmt.Sprint(*infoList)
-}
-
-func (infoList *NetForwardInfoList) Set(value string) error {
-	if len(*infoList) > 0 {
-		return errors.New("NetForwardInfoList flag already set")
-	}
-	for _, info := range strings.Split(value, ",") {
-		parts := strings.Split(info, "~")
-		sourceListenPort, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return err
-		}
-		remoteListenPort, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return err
-		}
-		//TODO: check if valid network address
-		*infoList = append(*infoList, NetForwardInfo{sourceListenPort, remoteListenPort, parts[2]})
-	}
-	return nil
-}
-
-func doIntercept() {
-	interceptFlagSet := flag.NewFlagSet("",flag.ExitOnError)
-	eventListenPort := interceptFlagSet.Int("e", 10000, "Event listen port")
-	sourceAddress := interceptFlagSet.String("s", "127.0.0.1:8000", "RAFT source address")
-
-	forwardInfo := NetForwardInfoList{}
-	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
-	interceptFlagSet.Parse(os.Args[2:])
-	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo)
-	select{}
-}
-

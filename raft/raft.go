@@ -53,6 +53,7 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 	applyCh chan ApplyMsg
+	eventCh chan RaftEvent
 
 	// persistent (must be saved to disk before rpc response)
 	currentTerm int
@@ -524,7 +525,7 @@ func (rf *Raft) Kill() {
 // for any long-running work.
 //
 func MakeRaft(peerAddresses []string, me int,
-	stateFilePath string, applyCh chan ApplyMsg, verbosity int) *Raft {
+	stateFilePath string, applyCh chan ApplyMsg, verbosity int, eventCh chan RaftEvent) *Raft {
 	rf := &Raft{}
 	rf.peers = make([]*UnreliableRpcClient, len(peerAddresses))
 	for index, address := range peerAddresses {
@@ -534,6 +535,7 @@ func MakeRaft(peerAddresses []string, me int,
 	}
 	rf.me = me
 	rf.applyCh = applyCh
+	rf.eventCh = eventCh
 	rf.stateFilePath = stateFilePath
 
 	// volatile RAFT variables
@@ -573,7 +575,9 @@ func (rf *Raft) ResetElectionTimer() {
 	if !rf.electionTimer.Stop() && len(rf.electionTimer.C) != 0 {
 		<-rf.electionTimer.C
 	}
-	rf.electionTimer.Reset(MinElectionTimeout + time.Duration(rf.rng.Intn(int(MinElectionTimeout))))
+	time := MinElectionTimeout + time.Duration(rf.rng.Intn(int(MinElectionTimeout)))
+	rf.electionTimer.Reset(time)
+	rf.sendEvent(SetElectionTimeoutEvent{time})
 }
 
 func (rf *Raft) ResetHeartbeatTimer() {
@@ -581,6 +585,7 @@ func (rf *Raft) ResetHeartbeatTimer() {
 		<-rf.heartbeatTimer.C
 	}
 	rf.heartbeatTimer.Reset(HeartbeatTimeout)
+	rf.sendEvent(SetHeartbeatTimeoutEvent{HeartbeatTimeout})
 }
 
 func (rf *Raft) Run() {
@@ -645,6 +650,11 @@ func (rf *Raft) becomeFollower(term int, keepVotedFor bool) {
 			rf.me, keepVotedFor, term)
 	}
 
+	if (rf.serverState != Follower || rf.currentTerm != term) {
+		//prevents redundant events
+		rf.sendEvent(SetServerStateEvent{Follower, term})
+	}
+
 	rf.serverState = Follower
 	rf.currentTerm = term
 	if !keepVotedFor {
@@ -672,6 +682,7 @@ func (rf *Raft) becomeLeader() {
 
 	// TODO: send no-op command with append entries to everyone (quick commit after leader election)
 	rf.sendAppendEntriesToAll()
+	rf.sendEvent(SetServerStateEvent{rf.serverState, rf.currentTerm})
 }
 
 func (rf *Raft) becomeCandidate() {
@@ -703,6 +714,7 @@ func (rf *Raft) becomeCandidate() {
 			go rf.sendRequestVote(serverIndex, requestVoteArgs)
 		}
 	}
+	rf.sendEvent(SetServerStateEvent{rf.serverState, rf.currentTerm})
 }
 
 func (rf *Raft) sendAppendEntriesToAll() {
@@ -761,22 +773,11 @@ func (rf *Raft) lastLogIndex() int {
 	return len(rf.log) - 1
 }
 
-// unconditionally:
-//    if you receive a RequestVote that has a higher term, become a follower, update term, give your vote
-//    if you receive a RequestVote with the same term, if you haven't voted in this term, give your vote
-//    if response to RequestVote has term higher than yours, become a follower, update term
-//    if response to RequestVote has term less than current term, ignore
-//    if you receive an AppendEntries that has a higher term, become a follower, update term
-//    if you receive an AppendEntries that has the same term, become (or stay) a follower, DON'T RESET VOTED FOR
-//    if response to AppendEntries has higher term, become a follower, update term
-
-// as a leader
-//    if heartbeat timer runs out, send new heartbeat
-//    if response to AppendEntries is successful, stored on majority of servers, and rf.log[rf.commitIndex] == rf.currentTerm (at least one entry from this term is committed), set commit index to the appendEntries index
-
-// as a candidate
-//    if response to RequestVote is equal to current term, count vote
-
-// as candidate or follower
-//    if you recieve AppendEntries and term is equal, process appropriately
+func (rf *Raft) sendEvent(event RaftEvent) {
+	if rf.eventCh != nil {
+		go func() {
+			rf.eventCh<-event
+		}()
+	}
+}
 
