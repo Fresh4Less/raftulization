@@ -8,8 +8,15 @@ import(
 type RaftEvent interface {
 }
 
-type LogUpdatedEvent struct {
-	Logs []Log
+//something in raft changed--just send all the data we care about
+type StateUpdatedEvent struct {
+	State ServerState
+	Term int
+	LogLength int
+	LastApplied int
+	RecentLogs []Log //last 8 logs
+	VotedFor int
+	ReceivedVotes []bool
 }
 
 type EntryCommittedEvent struct {
@@ -22,11 +29,6 @@ type SetElectionTimeoutEvent struct {
 
 type SetHeartbeatTimeoutEvent struct {
 	Duration time.Duration
-}
-
-type SetServerStateEvent struct {
-	State ServerState
-	Term int
 }
 
 type AppendEntriesEvent struct {
@@ -54,11 +56,10 @@ type RequestVoteResponseEvent struct {
 }
 
 func init() {
-	gob.Register(LogUpdatedEvent{})
+	gob.Register(StateUpdatedEvent{})
 	gob.Register(EntryCommittedEvent{})
 	gob.Register(SetElectionTimeoutEvent{})
 	gob.Register(SetHeartbeatTimeoutEvent{})
-	gob.Register(SetServerStateEvent{})
 	gob.Register(AppendEntriesEvent{})
 	gob.Register(AppendEntriesResponseEvent{})
 	gob.Register(RequestVoteEvent{})

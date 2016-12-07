@@ -84,6 +84,8 @@ func doRaft() {
 
 	for(true) {
 		select {
+			//we don't strictly need this event, because whenever LastApplied is incremented we send a StateUpdatedEvent
+			//however, it's useful enough to know when something is committed that we send these events anyway
 			case applyMsg := <-applyCh:
 				go func() {
 					eventCh<-raft.EntryCommittedEvent{applyMsg}
@@ -130,7 +132,15 @@ func doIntercept() {
 	forwardInfo := NetForwardInfoList{}
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
 	interceptFlagSet.Parse(os.Args[2:])
-	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo)
+
+	neopixelDisplay := NewNeopixelDisplay(18, 64+20+30, 255)
+	matrixDisplay := NewPixelDisplay(neopixelDisplay, 0, 8, 8, false)
+	networkDisplays := []*PixelDisplay{
+		NewPixelDisplay(neopixelDisplay, 0, 1, 20, false),
+		NewPixelDisplay(neopixelDisplay, 0, 1, 30, false),
+	}
+
+	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays)
 	select {}
 }
 

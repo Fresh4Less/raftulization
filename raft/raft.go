@@ -213,6 +213,8 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, reply *RequestVoteReply
 		fmt.Printf("%v: Handling RequestVote from %v (term: %v)\n", rf.me, args.CandidateId, args.Term)
 	}
 
+	defer rf.onStateUpdated()
+
 	if args.Term > rf.currentTerm  {
 		rf.becomeFollower(args.Term, false)
 	}
@@ -331,6 +333,8 @@ func (rf *Raft) handleAppendEntries(args *AppendEntriesArgs, reply *AppendEntrie
 		return
 	}
 
+	defer rf.onStateUpdated()
+
 	// process the RPC
 	reply.Term = rf.currentTerm
 
@@ -385,6 +389,7 @@ func (rf *Raft) handleAppendEntriesResponse(response *AppendEntriesResponse) {
 			rf.me, response.server, response.success, response.reply.Success, response.reply.Term)
 	}
 
+	defer rf.onStateUpdated()
 	if response.success {
 		if response.reply.Success {
 			// update values for that server
@@ -614,6 +619,7 @@ func (rf *Raft) Run() {
 				rf.log = append(rf.log, Log{rf.currentTerm, request.command})
 				rf.matchIndex[rf.me] = rf.lastLogIndex()
 				rf.persist()
+				rf.onStateUpdated()
 
 				rf.sendAppendEntriesToAll()
 				//NOTE: internally we use 0-based-index, but the tests expect 1-based index
@@ -632,6 +638,7 @@ func (rf *Raft) Run() {
 				if votes > len(rf.peers)/2 {
 					rf.becomeLeader()
 				}
+				rf.onStateUpdated()
 			}
 
 		case response := <-rf.appendEntriesResponses:
@@ -652,7 +659,7 @@ func (rf *Raft) becomeFollower(term int, keepVotedFor bool) {
 
 	if (rf.serverState != Follower || rf.currentTerm != term) {
 		//prevents redundant events
-		rf.sendEvent(SetServerStateEvent{Follower, term})
+		rf.onStateUpdated()
 	}
 
 	rf.serverState = Follower
@@ -682,7 +689,7 @@ func (rf *Raft) becomeLeader() {
 
 	// TODO: send no-op command with append entries to everyone (quick commit after leader election)
 	rf.sendAppendEntriesToAll()
-	rf.sendEvent(SetServerStateEvent{rf.serverState, rf.currentTerm})
+	rf.onStateUpdated()
 }
 
 func (rf *Raft) becomeCandidate() {
@@ -714,7 +721,7 @@ func (rf *Raft) becomeCandidate() {
 			go rf.sendRequestVote(serverIndex, requestVoteArgs)
 		}
 	}
-	rf.sendEvent(SetServerStateEvent{rf.serverState, rf.currentTerm})
+	rf.onStateUpdated()
 }
 
 func (rf *Raft) sendAppendEntriesToAll() {
@@ -779,5 +786,16 @@ func (rf *Raft) sendEvent(event RaftEvent) {
 			rf.eventCh<-event
 		}()
 	}
+}
+func (rf *Raft) onStateUpdated() {
+	rf.sendEvent(StateUpdatedEvent{
+		rf.serverState,
+		rf.currentTerm,
+		len(rf.log),
+		rf.lastApplied,
+		rf.log[maxInt(0,len(rf.log)-8):len(rf.log)],
+		rf.votedFor,
+		rf.receivedVote,
+	})
 }
 

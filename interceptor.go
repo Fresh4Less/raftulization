@@ -26,9 +26,11 @@ type Interceptor struct {
 	listener     *net.Listener
 	rpcServer    *rpc.Server
 	raftHandlers []*RaftHandler
+	matrixDisplay *PixelDisplay
+	networkDisplays []*PixelDisplay
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplay, networkDisplays []*PixelDisplay) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()
@@ -47,6 +49,9 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 			NewRaftHandler(&interceptor, info.RemoteListenPort, sourceAddress, i, false))
 	}
 
+	interceptor.matrixDisplay = matrixDisplay
+	interceptor.networkDisplays = networkDisplays
+
 	return &interceptor
 }
 
@@ -58,15 +63,13 @@ func (interceptor *Interceptor) OnEvent(event raft.RaftEvent, reply *bool) error
 
 func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	switch event := event.(type) {
-	case raft.LogUpdatedEvent:
+	case raft.StateUpdatedEvent:
+		interceptor.updateStateDisplay(event)
 	case raft.EntryCommittedEvent:
-		//fmt.Printf("EntryCommitted: %v\n", event.ApplyMsg.Index) TODO
 	case raft.SetElectionTimeoutEvent:
 		//fmt.Printf("SetElectionTimeout: %v\n", event.Duration)
 	case raft.SetHeartbeatTimeoutEvent:
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
-	case raft.SetServerStateEvent:
-		//fmt.Printf("SetServerState: %v, %v\n", event.State, event.Term)
 	case raft.AppendEntriesEvent:
 		//if event.Outgoing {
 			//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
@@ -102,6 +105,61 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 		fmt.Printf("Unexpected type %T\n", event)
 	}
 	return true
+}
+
+func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent) {
+	interceptor.matrixDisplay.Reset()
+	//id TODO don't hardcode this
+	interceptor.matrixDisplay.SetArea(0,0, MakeColorRect(2,2,MakeColor(255,0,0)))
+	// voted for TODO
+	//VotedFor int
+	// received votes TODO: use id colors instead of just counting
+	for i, voted := range event.ReceivedVotes {
+		if voted {
+			interceptor.matrixDisplay.Set(1,2+(i%4), MakeColor(255,200,0))
+		}
+	}
+	// state
+	interceptor.matrixDisplay.SetArea(0,6, MakeColorRect(2,2,StateColors[event.State]))
+	// logs
+	for i, log := range event.RecentLogs {
+		if img, ok := log.Command.([][]Color); ok {
+			//TODO: use last applied to display committed logs differently than uncommitted
+			//LastApplied int
+			//LogLength int
+			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorRect(1,2,averageColor(img)))
+		}
+	}
+	// term
+	interceptor.matrixDisplay.SetArea(5,0, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255,255,255), MakeColor(0,0,0)))
+	interceptor.matrixDisplay.SetArea(5,3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255,255,255), MakeColor(0,0,0)))
+	interceptor.matrixDisplay.SetArea(5,6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255,255,255), MakeColor(0,0,0)))
+	interceptor.matrixDisplay.Draw()
+}
+
+// this just returns averages of the RGB channels, probably should make it return full saturation & value or something
+func averageColor(colors [][]Color) Color {
+	rTotal := uint32(0)
+	gTotal := uint32(0)
+	bTotal := uint32(0)
+	count := uint32(0)
+	for _, row := range colors {
+		for _, color := range row {
+			rTotal += color.GetRed()
+			gTotal += color.GetGreen()
+			bTotal += color.GetBlue()
+			count++
+		}
+	}
+
+	return MakeColor(rTotal/count, gTotal/count, bTotal/count)
+}
+
+func nthDigit(a, n int) int {
+	for i := 0; i < n; i++ {
+		a /= 10
+	}
+	return (a % 10)
 }
 
 type RaftHandler struct {
@@ -151,4 +209,10 @@ func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.Ap
 		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, rh.outgoing})
 	}
 	return nil
+}
+
+var StateColors = map[raft.ServerState]Color{
+	raft.Follower: MakeColor(0,0,255),
+	raft.Candidate: MakeColor(0,255,0),
+	raft.Leader: MakeColor(255,0,0),
 }
