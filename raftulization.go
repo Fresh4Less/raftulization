@@ -143,25 +143,25 @@ func doIntercept() {
 
 	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, false)
 	networkDisplays := []*PixelDisplayView{
-		NewPixelDisplayView(neopixelDisplay, 64, 1, 30, false),
-		NewPixelDisplayView(neopixelDisplay, 64+30, 1, 20, false),
+		NewPixelDisplayView(neopixelDisplay, 64, 30, 1, false),
+		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, false),
 	}
-	for i := 0; i < 64; i++ {
-		neopixelDisplay.Set(i, MakeColor(255,0,0))
-	}
-	for i := 64; i < 64+30; i++ {
-		neopixelDisplay.Set(i, MakeColor(0,255,0))
-	}
-	for i := 64+30; i < 64+30+20; i++ {
-		neopixelDisplay.Set(i, MakeColor(0,0,255))
-	}
-	neopixelDisplay.Show()
-	/*matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))*/
-	/*matrixDisplay.Draw()*/
-	/*networkDisplays[0].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,255,0)))*/
-	/*networkDisplays[0].Draw()*/
-	/*networkDisplays[1].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,0,255)))*/
-	/*networkDisplays[1].Draw()*/
+	//for i := 0; i < 64; i++ {
+		//neopixelDisplay.Set(i, MakeColor(255,0,0))
+	//}
+	//for i := 64; i < 64+30; i++ {
+		//neopixelDisplay.Set(i, MakeColor(0,255,0))
+	//}
+	//for i := 64+30; i < 64+30+20; i++ {
+		//neopixelDisplay.Set(i, MakeColor(0,0,255))
+	//}
+	//neopixelDisplay.Show()
+	//matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))
+	//matrixDisplay.Draw()
+	//networkDisplays[0].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,255,0)))
+	//networkDisplays[0].Draw()
+	//networkDisplays[1].SetArea(0,0,MakeColorRect(20,1,MakeColor(0,0,255)))
+	//networkDisplays[1].Draw()
 
 	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays)
 	select {}

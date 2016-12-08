@@ -16,6 +16,7 @@ type FakeDisplay struct {
 }
 
 func (fd *FakeDisplay) Set(index int, color Color) {
+	//fmt.Printf("set %v, %v\n", index, color)
 }
 func (fd *FakeDisplay) Show() {
 }
@@ -66,7 +67,7 @@ func NewPixelDisplayView(display PixelDisplay, offset, width, height int, wrap b
 		panic(fmt.Sprintf("NewPixelDisplayView: invalid pixel dimensions (%v,%v,%v)", offset, width, height))
 	}
 	pd := PixelDisplayView{display, offset, width, height, wrap, make([][]Color, height)}
-	for i := 0; i < width; i++ {
+	for i := 0; i < height; i++ {
 		pd.Colors[i] = make([]Color, width)
 	}
 
@@ -100,7 +101,7 @@ func (pd *PixelDisplayView) SetArea(row, col int, colors [][]Color) {
 func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
-			pd.Display.Set(pd.Offset +  pd.Height*i + pd.Width, pd.Colors[i][j])
+			pd.Display.Set(pd.Offset +  pd.Height*i + j, pd.Colors[i][j])
 		}
 	}
 	pd.Display.Show()
