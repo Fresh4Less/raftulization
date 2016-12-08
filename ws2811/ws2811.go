@@ -1,3 +1,5 @@
+// +build pixelsupport
+
 // Copyright (c) 2015, Jacques Supcik, HEIA-FR
 // All rights reserved.
 //

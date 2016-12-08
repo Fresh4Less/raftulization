@@ -26,11 +26,11 @@ type Interceptor struct {
 	listener     *net.Listener
 	rpcServer    *rpc.Server
 	raftHandlers []*RaftHandler
-	matrixDisplay *PixelDisplay
-	networkDisplays []*PixelDisplay
+	matrixDisplay *PixelDisplayView
+	networkDisplays []*PixelDisplayView
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplay, networkDisplays []*PixelDisplay) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()

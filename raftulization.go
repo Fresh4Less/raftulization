@@ -128,16 +128,23 @@ func doIntercept() {
 	interceptFlagSet := flag.NewFlagSet("", flag.ExitOnError)
 	eventListenPort := interceptFlagSet.Int("e", 10000, "Event listen port")
 	sourceAddress := interceptFlagSet.String("s", "127.0.0.1:8000", "RAFT source address")
+	pixelsEnabled := interceptFlagSet.Bool("p", false, "Enable pixel displays")
 
 	forwardInfo := NetForwardInfoList{}
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
 	interceptFlagSet.Parse(os.Args[2:])
 
-	neopixelDisplay := NewNeopixelDisplay(18, 64+30+20, 255)
-	matrixDisplay := NewPixelDisplay(neopixelDisplay, 0, 8, 8, false)
-	networkDisplays := []*PixelDisplay{
-		NewPixelDisplay(neopixelDisplay, 64, 1, 30, false),
-		NewPixelDisplay(neopixelDisplay, 64+30, 1, 20, false),
+	var neopixelDisplay PixelDisplay
+	if *pixelsEnabled {
+		neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+	} else {
+		neopixelDisplay = &FakeDisplay{64+30+20}
+	}
+
+	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, false)
+	networkDisplays := []*PixelDisplayView{
+		NewPixelDisplayView(neopixelDisplay, 64, 1, 30, false),
+		NewPixelDisplayView(neopixelDisplay, 64+30, 1, 20, false),
 	}
 	for i := 0; i < 64; i++ {
 		neopixelDisplay.Set(i, MakeColor(255,0,0))

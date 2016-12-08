@@ -5,8 +5,27 @@ import(
 	"github.com/fresh4less/raftulization/ws2811"
 )
 
+type PixelDisplay interface {
+	Set(index int, color Color)
+	Show()
+	Count() int
+}
+
+type FakeDisplay struct {
+	count int
+}
+
+func (fd *FakeDisplay) Set(index int, color Color) {
+}
+func (fd *FakeDisplay) Show() {
+}
+func (fd *FakeDisplay) Count() int {
+	return fd.count
+}
+
+
 type NeopixelDisplay struct {
-	Count int
+	count int
 }
 
 func NewNeopixelDisplay(gpioPin, ledCount, brightness int) *NeopixelDisplay {
@@ -16,6 +35,10 @@ func NewNeopixelDisplay(gpioPin, ledCount, brightness int) *NeopixelDisplay {
 	}
 	display := NeopixelDisplay{ledCount}
 	return &display
+}
+
+func (nd *NeopixelDisplay) Count() int {
+	return nd.count
 }
 
 func (nd *NeopixelDisplay) Set(index int, color Color) {
@@ -30,19 +53,19 @@ func (nd *NeopixelDisplay) Show() {
 	}
 }
 
-type PixelDisplay struct {
-	Display *NeopixelDisplay
+type PixelDisplayView struct {
+	Display PixelDisplay
 	Offset, Width, Height int
 	Wrap bool
 	Colors [][]Color
 }
 
-//PixelDisplay defines a "view" into a NeoPixelDisplay that maps a 2d grid of colors onto the 1d led array
-func NewPixelDisplay(display *NeopixelDisplay, offset, width, height int, wrap bool) *PixelDisplay {
-	if offset < 0 || width < 0 || height < 0 || offset + width*height > display.Count {
-		panic(fmt.Sprintf("NewPixelDisplay: invalid pixel dimensions (%v,%v,%v)", offset, width, height))
+//PixelDisplayView defines a "view" into a NeoPixelDisplayView that maps a 2d grid of colors onto the 1d led array
+func NewPixelDisplayView(display PixelDisplay, offset, width, height int, wrap bool) *PixelDisplayView {
+	if offset < 0 || width < 0 || height < 0 || offset + width*height > display.Count() {
+		panic(fmt.Sprintf("NewPixelDisplayView: invalid pixel dimensions (%v,%v,%v)", offset, width, height))
 	}
-	pd := PixelDisplay{display, offset, width, height, wrap, make([][]Color, height)}
+	pd := PixelDisplayView{display, offset, width, height, wrap, make([][]Color, height)}
 	for i := 0; i < width; i++ {
 		pd.Colors[i] = make([]Color, width)
 	}
@@ -50,7 +73,7 @@ func NewPixelDisplay(display *NeopixelDisplay, offset, width, height int, wrap b
 	return &pd
 }
 
-func (pd *PixelDisplay) Reset() {
+func (pd *PixelDisplayView) Reset() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
 			pd.Colors[i][j] = 0
@@ -58,15 +81,15 @@ func (pd *PixelDisplay) Reset() {
 	}
 }
 
-func (pd *PixelDisplay) Set(row, col int, color Color) {
+func (pd *PixelDisplayView) Set(row, col int, color Color) {
 	if !pd.Wrap && (row < 0 || col < 0 || row >= pd.Height || col >= pd.Width) {
-		panic(fmt.Sprintf("PixelDisplay: Set: tried to set (%v,%v) but the display has dimensions (%v,%v)", row, col, pd.Height, pd.Width))
+		panic(fmt.Sprintf("PixelDisplayView: Set: tried to set (%v,%v) but the display has dimensions (%v,%v)", row, col, pd.Height, pd.Width))
 	}
 	pd.Colors[row % pd.Height][col % pd.Width] = color
 }
 
 // sets colors based on 2d array passed in
-func (pd *PixelDisplay) SetArea(row, col int, colors [][]Color) {
+func (pd *PixelDisplayView) SetArea(row, col int, colors [][]Color) {
 	for i := 0; i < len(colors); i++ {
 		for j := 0; j < len(colors[i]); j++ {
 			pd.Set(row + i, col + j, colors[i][j])
@@ -74,7 +97,7 @@ func (pd *PixelDisplay) SetArea(row, col int, colors [][]Color) {
 	}
 }
 
-func (pd *PixelDisplay) Draw() {
+func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
 			pd.Display.Set(pd.Offset +  pd.Height*i + pd.Width, pd.Colors[i][j])
