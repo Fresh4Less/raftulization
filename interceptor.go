@@ -108,6 +108,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 }
 
 func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent) {
+	return
 	interceptor.matrixDisplay.Reset()
 	//id TODO don't hardcode this
 	interceptor.matrixDisplay.SetArea(0,0, MakeColorRect(2,2,MakeColor(255,0,0)))

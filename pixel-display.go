@@ -2,6 +2,7 @@ package main
 
 import(
 	"fmt"
+	"github.com/fresh4less/raftulization/ws2811"
 )
 
 type NeopixelDisplay struct {
@@ -9,13 +10,24 @@ type NeopixelDisplay struct {
 }
 
 func NewNeopixelDisplay(gpioPin, ledCount, brightness int) *NeopixelDisplay {
-	return &NeopixelDisplay{ledCount}
+	err := ws2811.Init(gpioPin, ledCount, brightness)
+	if err != nil {
+		panic(err)
+	}
+	display := NeopixelDisplay{ledCount}
+	return &display
 }
 
 func (nd *NeopixelDisplay) Set(index int, color Color) {
+	ws2811.SetLed(index, uint32(color))
 }
 
 func (nd *NeopixelDisplay) Show() {
+	fmt.Printf("render\n")
+	err := ws2811.Render()
+	if err != nil {
+		panic(err)
+	}
 }
 
 type PixelDisplay struct {

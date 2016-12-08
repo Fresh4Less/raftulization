@@ -133,12 +133,28 @@ func doIntercept() {
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
 	interceptFlagSet.Parse(os.Args[2:])
 
-	neopixelDisplay := NewNeopixelDisplay(18, 64+20+30, 255)
+	neopixelDisplay := NewNeopixelDisplay(18, 64+30+20, 255)
 	matrixDisplay := NewPixelDisplay(neopixelDisplay, 0, 8, 8, false)
 	networkDisplays := []*PixelDisplay{
-		NewPixelDisplay(neopixelDisplay, 0, 1, 20, false),
-		NewPixelDisplay(neopixelDisplay, 0, 1, 30, false),
+		NewPixelDisplay(neopixelDisplay, 64, 1, 30, false),
+		NewPixelDisplay(neopixelDisplay, 64+30, 1, 20, false),
 	}
+	for i := 0; i < 64; i++ {
+		neopixelDisplay.Set(i, MakeColor(255,0,0))
+	}
+	for i := 64; i < 64+30; i++ {
+		neopixelDisplay.Set(i, MakeColor(0,255,0))
+	}
+	for i := 64+30; i < 64+30+20; i++ {
+		neopixelDisplay.Set(i, MakeColor(0,0,255))
+	}
+	neopixelDisplay.Show()
+	/*matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))*/
+	/*matrixDisplay.Draw()*/
+	/*networkDisplays[0].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,255,0)))*/
+	/*networkDisplays[0].Draw()*/
+	/*networkDisplays[1].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,0,255)))*/
+	/*networkDisplays[1].Draw()*/
 
 	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays)
 	select {}
