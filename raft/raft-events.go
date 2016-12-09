@@ -55,6 +55,18 @@ type RequestVoteResponseEvent struct {
 	Outgoing bool
 }
 
+type StartEvent struct {
+	Args StartArgs
+	Peer int
+	Outgoing bool
+}
+
+type StartResponseEvent struct {
+	Reply StartReply
+	Peer int
+	Outgoing bool
+}
+
 func init() {
 	gob.Register(StateUpdatedEvent{})
 	gob.Register(EntryCommittedEvent{})

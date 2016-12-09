@@ -498,14 +498,28 @@ func maxInt(x, y int) int {
 // term. the third return value is true if this server believes it is
 // the leader.
 //
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
+
+type StartArgs struct {
+	Command interface{}
+}
+
+type StartReply struct {
+	Index int
+	Term int
+	IsLeader bool
+}
+
+func (rf *Raft) Start(args *StartArgs, reply *StartReply) error {
 	if rf.Verbosity >= 1 {
-		fmt.Printf("%v: Command submitted: %v\n", rf.me, command)
+		fmt.Printf("%v: Command submitted: %v\n", rf.me, args.Command)
 	}
 	done := make(chan StartResponse)
-	rf.startRequests <- StartRequestData{command, done}
+	rf.startRequests <- StartRequestData{args.Command, done}
 	response := <-done
-	return response.index, response.term, response.isLeader
+	reply.Index = response.index
+	reply.Term = response.term
+	reply.IsLeader = response.isLeader
+	return nil
 }
 
 //

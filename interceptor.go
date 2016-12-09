@@ -23,10 +23,10 @@ type NetForwardInfo struct {
 }
 
 type Interceptor struct {
-	listener     *net.Listener
-	rpcServer    *rpc.Server
-	raftHandlers []*RaftHandler
-	matrixDisplay *PixelDisplayView
+	listener        *net.Listener
+	rpcServer       *rpc.Server
+	raftHandlers    []*RaftHandler
+	matrixDisplay   *PixelDisplayView
 	networkDisplays []*PixelDisplayView
 }
 
@@ -72,9 +72,9 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
 		//if event.Outgoing {
-			//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
+		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
 		//} else {
-			//fmt.Printf("AppendEntries: <-%v\n", event.Peer)
+		//fmt.Printf("AppendEntries: <-%v\n", event.Peer)
 		//}
 		//animate(event.Args,event.Peer, event.Outgoing)
 		//Term int
@@ -85,21 +85,21 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 		//LeaderCommit int
 	case raft.AppendEntriesResponseEvent:
 		//if event.Outgoing {
-			//fmt.Printf("AppendEntriesResponse: ->%v\n", event.Peer)
+		//fmt.Printf("AppendEntriesResponse: ->%v\n", event.Peer)
 		//} else {
-			//fmt.Printf("AppendEntriesResponse: <-%v\n", event.Peer)
+		//fmt.Printf("AppendEntriesResponse: <-%v\n", event.Peer)
 		//}
 	case raft.RequestVoteEvent:
 		//if event.Outgoing {
-			//fmt.Printf("RequestVote: ->%v\n", event.Peer)
+		//fmt.Printf("RequestVote: ->%v\n", event.Peer)
 		//} else {
-			//fmt.Printf("RequestVote: <-%v\n", event.Peer)
+		//fmt.Printf("RequestVote: <-%v\n", event.Peer)
 		//}
 	case raft.RequestVoteResponseEvent:
 		//if event.Outgoing {
-			//fmt.Printf("RequestVoteResponse: ->%v\n", event.Peer)
+		//fmt.Printf("RequestVoteResponse: ->%v\n", event.Peer)
 		//} else {
-			//fmt.Printf("RequestVoteResponse: <-%v\n", event.Peer)
+		//fmt.Printf("RequestVoteResponse: <-%v\n", event.Peer)
 		//}
 	default:
 		fmt.Printf("Unexpected type %T\n", event)
@@ -111,30 +111,30 @@ func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent)
 	return
 	interceptor.matrixDisplay.Reset()
 	//id TODO don't hardcode this
-	interceptor.matrixDisplay.SetArea(0,0, MakeColorRect(2,2,MakeColor(255,0,0)))
+	interceptor.matrixDisplay.SetArea(0, 0, MakeColorRect(2, 2, MakeColor(255, 0, 0)))
 	// voted for TODO
 	//VotedFor int
 	// received votes TODO: use id colors instead of just counting
 	for i, voted := range event.ReceivedVotes {
 		if voted {
-			interceptor.matrixDisplay.Set(1,2+(i%4), MakeColor(255,200,0))
+			interceptor.matrixDisplay.Set(1, 2+(i%4), MakeColor(255, 200, 0))
 		}
 	}
 	// state
-	interceptor.matrixDisplay.SetArea(0,6, MakeColorRect(2,2,StateColors[event.State]))
+	interceptor.matrixDisplay.SetArea(0, 6, MakeColorRect(2, 2, StateColors[event.State]))
 	// logs
 	for i, log := range event.RecentLogs {
 		if img, ok := log.Command.([][]Color); ok {
 			//TODO: use last applied to display committed logs differently than uncommitted
 			//LastApplied int
 			//LogLength int
-			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorRect(1,2,averageColor(img)))
+			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorRect(1, 2, averageColor(img)))
 		}
 	}
 	// term
-	interceptor.matrixDisplay.SetArea(5,0, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255,255,255), MakeColor(0,0,0)))
-	interceptor.matrixDisplay.SetArea(5,3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255,255,255), MakeColor(0,0,0)))
-	interceptor.matrixDisplay.SetArea(5,6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255,255,255), MakeColor(0,0,0)))
+	interceptor.matrixDisplay.SetArea(5, 0, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
+	interceptor.matrixDisplay.SetArea(5, 3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
+	interceptor.matrixDisplay.SetArea(5, 6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
 	interceptor.matrixDisplay.Draw()
 }
 
@@ -189,6 +189,15 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	fmt.Printf("RaftHandler: Listening on %v\n", listenPort)
 
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
+	//go func() {
+		//reply := raft.StartReply{}
+		//success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{"hello"}, &reply)
+		//if success {
+			//fmt.Printf("Start hello: %v\n", reply)
+		//} else {
+			//fmt.Printf("err\n")
+		//}
+	//}()
 
 	return &rh
 }
@@ -212,8 +221,17 @@ func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.Ap
 	return nil
 }
 
+func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error {
+	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
+	success := rh.forwardClient.Call("Raft.Start", args, reply)
+	if success {
+		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, rh.outgoing})
+	}
+	return nil
+}
+
 var StateColors = map[raft.ServerState]Color{
-	raft.Follower: MakeColor(0,0,255),
-	raft.Candidate: MakeColor(0,255,0),
-	raft.Leader: MakeColor(255,0,0),
+	raft.Follower:  MakeColor(0, 0, 255),
+	raft.Candidate: MakeColor(0, 255, 0),
+	raft.Leader:    MakeColor(255, 0, 0),
 }

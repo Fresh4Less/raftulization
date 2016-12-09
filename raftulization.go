@@ -9,11 +9,11 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"time"
 	"os"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type IpAddressList []string
@@ -82,18 +82,18 @@ func doRaft() {
 
 	eventClient := raft.NewUnreliableRpcClient(*eventAddress, 5, time.Second)
 
-	for(true) {
+	for true {
 		select {
-			//we don't strictly need this event, because whenever LastApplied is incremented we send a StateUpdatedEvent
-			//however, it's useful enough to know when something is committed that we send these events anyway
-			case applyMsg := <-applyCh:
-				go func() {
-					eventCh<-raft.EntryCommittedEvent{applyMsg}
-				}()
-			case event := <-eventCh:
-				go func() {
-					eventClient.Call("Interceptor.OnEvent", &event, nil)
-				}()
+		//we don't strictly need this event, because whenever LastApplied is incremented we send a StateUpdatedEvent
+		//however, it's useful enough to know when something is committed that we send these events anyway
+		case applyMsg := <-applyCh:
+			go func() {
+				eventCh <- raft.EntryCommittedEvent{applyMsg}
+			}()
+		case event := <-eventCh:
+			go func() {
+				eventClient.Call("Interceptor.OnEvent", &event, nil)
+			}()
 		}
 	}
 }
@@ -138,7 +138,7 @@ func doIntercept() {
 	if *pixelsEnabled {
 		neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
 	} else {
-		neopixelDisplay = &FakeDisplay{64+30+20}
+		neopixelDisplay = &FakeDisplay{64 + 30 + 20}
 	}
 
 	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, false)
@@ -147,13 +147,13 @@ func doIntercept() {
 		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, false),
 	}
 	//for i := 0; i < 64; i++ {
-		//neopixelDisplay.Set(i, MakeColor(255,0,0))
+	//neopixelDisplay.Set(i, MakeColor(255,0,0))
 	//}
 	//for i := 64; i < 64+30; i++ {
-		//neopixelDisplay.Set(i, MakeColor(0,255,0))
+	//neopixelDisplay.Set(i, MakeColor(0,255,0))
 	//}
 	//for i := 64+30; i < 64+30+20; i++ {
-		//neopixelDisplay.Set(i, MakeColor(0,0,255))
+	//neopixelDisplay.Set(i, MakeColor(0,0,255))
 	//}
 	//neopixelDisplay.Show()
 	//matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))

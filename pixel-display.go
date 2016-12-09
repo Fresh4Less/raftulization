@@ -1,8 +1,9 @@
 package main
 
-import(
+import (
 	"fmt"
 	"github.com/fresh4less/raftulization/ws2811"
+	"time"
 )
 
 type PixelDisplay interface {
@@ -20,10 +21,10 @@ func (fd *FakeDisplay) Set(index int, color Color) {
 }
 func (fd *FakeDisplay) Show() {
 }
+
 func (fd *FakeDisplay) Count() int {
 	return fd.count
 }
-
 
 type NeopixelDisplay struct {
 	count int
@@ -47,7 +48,7 @@ func (nd *NeopixelDisplay) Set(index int, color Color) {
 }
 
 func (nd *NeopixelDisplay) Show() {
-	fmt.Printf("render\n")
+	//fmt.Printf("render\n")
 	err := ws2811.Render()
 	if err != nil {
 		panic(err)
@@ -55,15 +56,15 @@ func (nd *NeopixelDisplay) Show() {
 }
 
 type PixelDisplayView struct {
-	Display PixelDisplay
+	Display               PixelDisplay
 	Offset, Width, Height int
-	Wrap bool
-	Colors [][]Color
+	Wrap                  bool
+	Colors                [][]Color
 }
 
 //PixelDisplayView defines a "view" into a NeoPixelDisplayView that maps a 2d grid of colors onto the 1d led array
 func NewPixelDisplayView(display PixelDisplay, offset, width, height int, wrap bool) *PixelDisplayView {
-	if offset < 0 || width < 0 || height < 0 || offset + width*height > display.Count() {
+	if offset < 0 || width < 0 || height < 0 || offset+width*height > display.Count() {
 		panic(fmt.Sprintf("NewPixelDisplayView: invalid pixel dimensions (%v,%v,%v)", offset, width, height))
 	}
 	pd := PixelDisplayView{display, offset, width, height, wrap, make([][]Color, height)}
@@ -86,14 +87,14 @@ func (pd *PixelDisplayView) Set(row, col int, color Color) {
 	if !pd.Wrap && (row < 0 || col < 0 || row >= pd.Height || col >= pd.Width) {
 		panic(fmt.Sprintf("PixelDisplayView: Set: tried to set (%v,%v) but the display has dimensions (%v,%v)", row, col, pd.Height, pd.Width))
 	}
-	pd.Colors[row % pd.Height][col % pd.Width] = color
+	pd.Colors[row%pd.Height][col%pd.Width] = color
 }
 
 // sets colors based on 2d array passed in
 func (pd *PixelDisplayView) SetArea(row, col int, colors [][]Color) {
 	for i := 0; i < len(colors); i++ {
 		for j := 0; j < len(colors[i]); j++ {
-			pd.Set(row + i, col + j, colors[i][j])
+			pd.Set(row+i, col+j, colors[i][j])
 		}
 	}
 }
@@ -101,31 +102,40 @@ func (pd *PixelDisplayView) SetArea(row, col int, colors [][]Color) {
 func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
-			pd.Display.Set(pd.Offset +  pd.Height*i + j, pd.Colors[i][j])
+			pd.Display.Set(pd.Offset+pd.Height*i+j, pd.Colors[i][j])
 		}
 	}
 	pd.Display.Show()
 }
 
+// blocks
+func (pd *PixelDisplayView) DrawAnimation(row, col int, frames [][][]Color, fps float32) {
+	for _, frame := range frames {
+		pd.SetArea(row, col, frame)
+		time.Sleep(time.Second / (time.Duration(fps)*time.Second))
+	}
+}
+
 type Color uint32
 
 func (color Color) GetRed() uint32 {
-	return uint32((color >> 16) & (2<<16 - 1))
-}
-func (color Color) GetGreen() uint32 {
 	return uint32((color >> 8) & (2<<8 - 1))
+}
+
+func (color Color) GetGreen() uint32 {
+	return uint32((color >> 16) & (2<<8 - 1))
 }
 
 func (color Color) GetBlue() uint32 {
 	return uint32(color & (2<<8 - 1))
 }
 
-func (color Color) GetWhite() uint32 {
-	return uint32((color >> 24) & (2<<24 - 1))
-}
+//func (color Color) GetWhite() uint32 {
+	//return uint32((color >> 24) & (2<<8 - 1))
+//}
 
 func MakeColor(red, green, blue uint32) Color {
-	return Color((red<<16) | (green<<8) | blue)
+	return Color((green << 16) | (red << 8) | blue)
 }
 
 func MakeColorHue(hue uint32) Color {
@@ -136,13 +146,13 @@ func MakeColorHue(hue uint32) Color {
 		hue -= 255
 	}
 	if hue < 85 {
-		return MakeColor(hue * 3, 255 - hue * 3, 0)
+		return MakeColor(hue*3, 255-hue*3, 0)
 	} else if hue < 170 {
 		hue -= 85
-		return MakeColor(255 - hue * 3, 0, hue * 3)
+		return MakeColor(255-hue*3, 0, hue*3)
 	} else {
 		hue -= 170
-		return MakeColor(0, hue * 3, 255 - hue * 3)
+		return MakeColor(0, hue*3, 255-hue*3)
 	}
 }
 
@@ -154,7 +164,7 @@ func MakeColorRect(width, height int, color Color) [][]Color {
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-				colors[i][j] = color
+			colors[i][j] = color
 		}
 	}
 
@@ -162,7 +172,7 @@ func MakeColorRect(width, height int, color Color) [][]Color {
 }
 
 func MakeColorPercentBar(width, height int, vertical bool, percent float32, fgColor, bgColor Color) [][]Color {
-	cutoffIndex := int(percent*float32(width+1))
+	cutoffIndex := int(percent * float32(width+1))
 	colors := MakeColorRect(width, height, bgColor)
 
 	for i := 0; i < len(colors); i++ {
@@ -179,7 +189,7 @@ func MakeColorPercentBar(width, height int, vertical bool, percent float32, fgCo
 
 // Makes a 2x3 resolution number with the given colors
 func MakeColorNumberChar(num int, fgColor, bgColor Color) [][]Color {
-	colors := MakeColorRect(2,3, bgColor)
+	colors := MakeColorRect(2, 3, bgColor)
 	for i := 0; i < len(colors); i++ {
 		for j := 0; j < len(colors[i]); j++ {
 			if NumberCharTemplates[num][i][j] {
@@ -194,62 +204,62 @@ func MakeColorNumberChar(num int, fgColor, bgColor Color) [][]Color {
 var NumberCharTemplates [][][]bool = [][][]bool{
 	//0
 	[][]bool{
-		[]bool{true,true},
-		[]bool{true,true},
-		[]bool{true,true},
+		[]bool{true, true},
+		[]bool{true, true},
+		[]bool{true, true},
 	},
 	//1
 	[][]bool{
-		[]bool{false,true},
-		[]bool{false,true},
-		[]bool{false,true},
+		[]bool{false, true},
+		[]bool{false, true},
+		[]bool{false, true},
 	},
 	//2
 	[][]bool{
-		[]bool{true,true},
-		[]bool{false,true},
-		[]bool{true,false},
+		[]bool{true, true},
+		[]bool{false, true},
+		[]bool{true, false},
 	},
 	//3
 	[][]bool{
-		[]bool{true,true},
-		[]bool{false,true},
-		[]bool{true,true},
+		[]bool{true, true},
+		[]bool{false, true},
+		[]bool{true, true},
 	},
 	//4
 	[][]bool{
-		[]bool{true,false},
-		[]bool{true,true},
-		[]bool{false,true},
+		[]bool{true, false},
+		[]bool{true, true},
+		[]bool{false, true},
 	},
 	//5
 	[][]bool{
-		[]bool{true,true},
-		[]bool{true,false},
-		[]bool{false,true},
+		[]bool{true, true},
+		[]bool{true, false},
+		[]bool{false, true},
 	},
 	//6
 	[][]bool{
-		[]bool{true,false},
-		[]bool{true,true},
-		[]bool{true,true},
+		[]bool{true, false},
+		[]bool{true, true},
+		[]bool{true, true},
 	},
 	//7
 	[][]bool{
-		[]bool{true,true},
-		[]bool{false,true},
-		[]bool{true,false},
+		[]bool{true, true},
+		[]bool{false, true},
+		[]bool{true, false},
 	},
 	//8
 	[][]bool{
-		[]bool{true,true},
-		[]bool{false,false},
-		[]bool{true,true},
+		[]bool{true, true},
+		[]bool{false, false},
+		[]bool{true, true},
 	},
 	//9
 	[][]bool{
-		[]bool{true,true},
-		[]bool{true,true},
-		[]bool{false,true},
+		[]bool{true, true},
+		[]bool{true, true},
+		[]bool{false, true},
 	},
 }
