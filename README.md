@@ -30,3 +30,8 @@ Flags:
  - `-f`: Comma separated list of forwarding addresses. Each address is of the form `P1~P2~C` where P1 is the source->client forwarding port,
          P2 is the client->source forwarding port, and C is the client ip address.
 
+Run LED test:
+
+`./raftulization ledtest`
+
+If pixelsupport is enabled and you get device errors, make sure you run as sudo.

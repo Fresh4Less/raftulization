@@ -44,6 +44,7 @@ func (nd *NeopixelDisplay) Count() int {
 }
 
 func (nd *NeopixelDisplay) Set(index int, color Color) {
+	//fmt.Printf("set %v\n", index)
 	ws2811.SetLed(index, uint32(color))
 }
 
@@ -112,6 +113,7 @@ func (pd *PixelDisplayView) Draw() {
 func (pd *PixelDisplayView) DrawAnimation(row, col int, frames [][][]Color, fps float32) {
 	for _, frame := range frames {
 		pd.SetArea(row, col, frame)
+		pd.Draw()
 		time.Sleep(time.Second / (time.Duration(fps)*time.Second))
 	}
 }

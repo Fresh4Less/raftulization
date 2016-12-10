@@ -44,6 +44,8 @@ func main() {
 		doRaft()
 	case "intercept":
 		doIntercept()
+	case "ledtest":
+		doLedTest()
 	default:
 		fmt.Printf("usage: raftulization raft|intercept [options]\n")
 		os.Exit(1)
@@ -147,15 +149,16 @@ func doIntercept() {
 		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, false),
 	}
 	//for i := 0; i < 64; i++ {
-	//neopixelDisplay.Set(i, MakeColor(255,0,0))
+	//	neopixelDisplay.Set(i, MakeColor(255,0,0))
 	//}
 	//for i := 64; i < 64+30; i++ {
-	//neopixelDisplay.Set(i, MakeColor(0,255,0))
+	//	neopixelDisplay.Set(i, MakeColor(0,255,0))
 	//}
 	//for i := 64+30; i < 64+30+20; i++ {
-	//neopixelDisplay.Set(i, MakeColor(0,0,255))
+	//	neopixelDisplay.Set(i, MakeColor(0,0,255))
 	//}
 	//neopixelDisplay.Show()
+
 	//matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))
 	//matrixDisplay.Draw()
 	//networkDisplays[0].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,255,0)))
@@ -164,7 +167,34 @@ func doIntercept() {
 	//networkDisplays[1].Draw()
 
 	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays)
-	select {}
+	select{}
+}
+
+func doLedTest() {
+	var neopixelDisplay PixelDisplay
+	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+
+	colors := []Color{
+		MakeColor(255,0,0),
+		MakeColor(0,255,0),
+		MakeColor(0,0,255),
+	}
+
+	t := 0
+	for true {
+		for i := 0; i < 64; i++ {
+			neopixelDisplay.Set(i, colors[t%3])
+		}
+		for i := 64; i < 64+30; i++ {
+			neopixelDisplay.Set(i, colors[(t+1)%3])
+		}
+		for i := 64+30; i < 64+30+20; i++ {
+			neopixelDisplay.Set(i, colors[(t+2)%3])
+		}
+		neopixelDisplay.Show()
+		time.Sleep(1*time.Second)
+		t++
+	}
 }
 
 /*

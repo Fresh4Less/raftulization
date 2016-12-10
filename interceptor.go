@@ -86,7 +86,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
 
-		interceptor.networkDisplays[0].DrawAnimation(0,0,animation, calcFps(len(animation)))
+		go interceptor.networkDisplays[0].DrawAnimation(0,0,animation, calcFps(len(animation)))
 
 		//if event.Outgoing {
 		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
@@ -130,7 +130,6 @@ func calcFps(frameCount int) float32 {
 
 
 func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent) {
-	return
 	interceptor.matrixDisplay.Reset()
 	//id TODO don't hardcode this
 	interceptor.matrixDisplay.SetArea(0, 0, MakeColorRect(2, 2, MakeColor(255, 0, 0)))
