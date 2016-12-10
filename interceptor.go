@@ -15,11 +15,18 @@ import (
 // for each remote peer we listen on a separate "source" and "remote" port
 // This means that for each remote peer we create two RaftHandlers
 
+const NetworkForwardDelay = time.Millisecond * 700
+
 type NetForwardInfo struct {
 	SourceListenPort int
 
 	RemoteListenPort int
 	ForwardAddress   string
+}
+
+type SetPixelCommand struct {
+	X, Y int
+	PixelColor Color
 }
 
 type Interceptor struct {
@@ -71,6 +78,16 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.SetHeartbeatTimeoutEvent:
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
+		colors := MakeColorRect(1,1 + len(event.Args.Entries), MakeColor(0,0,0))
+		colors[0][len(colors)-1] = MakeColor(255,0,0)
+		for i := 0; i < len(colors)-1; i++ {
+			colors[0][i] = event.Args.Entries[i].Command.(SetPixelCommand).PixelColor
+		}
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
+
+		interceptor.networkDisplays[0].DrawAnimation(0,0,animation, calcFps(len(animation)))
+
 		//if event.Outgoing {
 		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
 		//} else {
@@ -107,6 +124,11 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	return true
 }
 
+func calcFps(frameCount int) float32 {
+	return float32(1000*frameCount)/float32(NetworkForwardDelay/time.Millisecond)
+}
+
+
 func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent) {
 	return
 	interceptor.matrixDisplay.Reset()
@@ -136,6 +158,24 @@ func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent)
 	interceptor.matrixDisplay.SetArea(5, 3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
 	interceptor.matrixDisplay.SetArea(5, 6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
 	interceptor.matrixDisplay.Draw()
+}
+
+// moves horizontally only
+func MakeMovingSegmentAnimation(colors [][]Color, length int) [][][]Color {
+	frameCount := 2*len(colors[0])+ length
+	frames := make([][][]Color, frameCount)
+	for frame := 0; frame < frameCount; frame++ {
+		frames[frame] = MakeColorRect(length, 1, MakeColor(0,0,0))
+		beginIndex := frame - (len(colors[0])-1)
+		for i, row := range colors {
+			for j, color := range row {
+				if beginIndex+j >= 0 && beginIndex+j < length {
+					frames[frame][i][j] = color
+				}
+			}
+		}
+	}
+	return frames
 }
 
 // this just returns averages of the RGB channels, probably should make it return full saturation & value or something
@@ -205,27 +245,33 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 /*** RAFT RPCs **/
 func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.RequestVoteReply) error {
 	rh.interceptor.OnEventHandler(raft.RequestVoteEvent{args, rh.peer, rh.outgoing})
+	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, rh.outgoing})
+		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
 }
 
 func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.AppendEntriesReply) error {
 	rh.interceptor.OnEventHandler(raft.AppendEntriesEvent{args, rh.peer, rh.outgoing})
+	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, rh.outgoing})
+		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
 }
 
 func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error {
+	time.Sleep(NetworkForwardDelay)
 	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
 	success := rh.forwardClient.Call("Raft.Start", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, rh.outgoing})
+		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
 }

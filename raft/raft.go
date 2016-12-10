@@ -116,8 +116,8 @@ type Log struct {
 	Command interface{}
 }
 
-const MinElectionTimeout = time.Millisecond * 120
-const HeartbeatTimeout = time.Millisecond * 50
+const MinElectionTimeout = time.Millisecond * 2000
+const HeartbeatTimeout = time.Millisecond * 1500
 
 // return currentTerm and whether this server
 // believes it is the leader.
