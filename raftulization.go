@@ -195,6 +195,20 @@ func doLedTest() {
 		time.Sleep(1*time.Second)
 		t++
 	}
+
+	//neopixelDisplay := &FakeDisplay{30}
+	//matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 30, 1, false)
+
+	//colors := MakeColorRect(5,1, MakeColor(0,0,0))
+	//colors[0][len(colors[0])-1] = MakeColor(255,0,0)
+	//for i := 0; i < len(colors[0])-1; i++ {
+		//colors[0][i] = MakeColor(0,255,0)
+	//}
+
+	//animation := MakeMovingSegmentAnimation(colors, neopixelDisplay.Count())
+	////fmt.Printf("%v\n", animation[1])
+
+	//matrixDisplay.DrawAnimation(0,0,animation, calcFps(len(animation)))
 }
 
 /*

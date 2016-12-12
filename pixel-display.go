@@ -104,8 +104,17 @@ func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
 			pd.Display.Set(pd.Offset+pd.Height*i+j, pd.Colors[i][j])
+			//if pd.Colors[i][j] == 0 {
+				//fmt.Printf("*")
+			//} else if pd.Colors[i][j] == MakeColor(255,0,0) {
+				//fmt.Printf("x")
+			//} else {
+				//fmt.Printf("0")
+			//}
 		}
+		//fmt.Printf("\n")
 	}
+	//fmt.Printf("\n")
 	pd.Display.Show()
 }
 

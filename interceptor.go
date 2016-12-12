@@ -79,8 +79,8 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
 		colors := MakeColorRect(1,1 + len(event.Args.Entries), MakeColor(0,0,0))
-		colors[0][len(colors)-1] = MakeColor(255,0,0)
-		for i := 0; i < len(colors)-1; i++ {
+		colors[0][len(colors[0])-1] = MakeColor(255,0,0)
+		for i := 0; i < len(colors[0])-1; i++ {
 			colors[0][i] = event.Args.Entries[i].Command.(SetPixelCommand).PixelColor
 		}
 
@@ -161,7 +161,7 @@ func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent)
 
 // moves horizontally only
 func MakeMovingSegmentAnimation(colors [][]Color, length int) [][][]Color {
-	frameCount := 2*len(colors[0])+ length
+	frameCount := len(colors[0])+ length-1
 	frames := make([][][]Color, frameCount)
 	for frame := 0; frame < frameCount; frame++ {
 		frames[frame] = MakeColorRect(length, 1, MakeColor(0,0,0))
@@ -169,7 +169,7 @@ func MakeMovingSegmentAnimation(colors [][]Color, length int) [][][]Color {
 		for i, row := range colors {
 			for j, color := range row {
 				if beginIndex+j >= 0 && beginIndex+j < length {
-					frames[frame][i][j] = color
+					frames[frame][i][beginIndex+j] = color
 				}
 			}
 		}
