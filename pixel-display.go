@@ -250,6 +250,7 @@ func (mfv *MultiFrameView) UpdateFrame(frame *ColorFrame) {
 
 
 func (mfv *MultiFrameView) beginTransition(frameIndex int, duration time.Duration, transition FrameTransition) {
+	fmt.Printf("begin transition %v\n", frameIndex)
 	mfv.transitionIndex++
 	transitionIndex := mfv.transitionIndex
 	mfv.currentFrame = frameIndex
@@ -275,11 +276,12 @@ func (mfv *MultiFrameView) beginTransition(frameIndex int, duration time.Duratio
 
 					mfv.frames[frameIndex].x--
 					mfv.frames[nextFrameIndex].x--
-					mfv.display.Draw()
+					mfv.draw()
 				}
 
 				mfv.currentFrame = nextFrameIndex
 				mfv.transitioning = false
+				mfv.beginTransition(mfv.currentFrame, mfv.frames[mfv.currentFrame].duration, mfv.frames[mfv.currentFrame].transition)
 			}()
 
 	}
@@ -294,6 +296,8 @@ func (mfv *MultiFrameView) draw() {
 		nextFrame := mfv.frames[(mfv.currentFrame + 1) % len(mfv.frames)]
 		mfv.display.Colors.SetRect(nextFrame.x, nextFrame.y, *nextFrame.frame, Clip)
 	}
+	fmt.Printf("draw %v\n", mfv.display.Colors)
+	mfv.display.Draw()
 }
 
 /********** Color Helper Constructors **********/

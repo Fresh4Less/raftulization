@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
 	"net"
@@ -168,7 +169,7 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 			//TODO: use last applied to display committed logs differently than uncommitted
 			//LastApplied int
 			//LogLength int
-			interceptor.raftStateScreen.SetRect(2, i+8-len(event.RecentLogs), MakeColorFrame(1, 2, setPixelCommand.PixelColor), Error)
+			interceptor.raftStateScreen.SetRect(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 2, setPixelCommand.PixelColor), Error)
 		}
 	}
 	// term
@@ -176,36 +177,6 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 	interceptor.raftStateScreen.SetRect(3, 5, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
 	interceptor.raftStateScreen.SetRect(6, 5, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
 	interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
-	//interceptor.matrixDisplay.Draw()
-	/*
-	interceptor.matrixDisplay.Reset()
-	//id TODO don't hardcode this
-	interceptor.matrixDisplay.SetArea(0, 0, MakeColorFrame(2, 2, MakeColor(255, 0, 0)))
-	// voted for TODO
-	//VotedFor int
-	// received votes TODO: use id colors instead of just counting
-	for i, voted := range event.ReceivedVotes {
-		if voted {
-			interceptor.matrixDisplay.Set(1, 2+(i%4), MakeColor(255, 200, 0))
-		}
-	}
-	// state
-	interceptor.matrixDisplay.SetArea(0, 6, MakeColorFrame(2, 2, StateColors[event.State]))
-	// logs
-	for i, log := range event.RecentLogs {
-		if img, ok := log.Command.([][]Color); ok {
-			//TODO: use last applied to display committed logs differently than uncommitted
-			//LastApplied int
-			//LogLength int
-			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 2, averageColor(img)))
-		}
-	}
-	// term
-	interceptor.matrixDisplay.SetArea(5, 0, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
-	interceptor.matrixDisplay.SetArea(5, 3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
-	interceptor.matrixDisplay.SetArea(5, 6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
-	interceptor.matrixDisplay.Draw()
-	*/
 }
 
 func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent) {
@@ -267,15 +238,15 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	fmt.Printf("RaftHandler: Listening on %v\n", listenPort)
 
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
-	//go func() {
-		//reply := raft.StartReply{}
-		//success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{"hello"}, &reply)
-		//if success {
-			//fmt.Printf("Start hello: %v\n", reply)
-		//} else {
-			//fmt.Printf("err\n")
-		//}
-	//}()
+	go func() {
+		reply := raft.StartReply{}
+		success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{1,1,MakeColor(0,255,0)}}, &reply)
+		if success {
+			fmt.Printf("Start hello: %v\n", reply)
+		} else {
+			fmt.Printf("err\n")
+		}
+	}()
 
 	return &rh
 }
@@ -318,4 +289,8 @@ var StateColors = map[raft.ServerState]Color{
 	raft.Follower:  MakeColor(0, 0, 255),
 	raft.Candidate: MakeColor(0, 255, 0),
 	raft.Leader:    MakeColor(255, 0, 0),
+}
+
+func init() {
+	gob.Register(SetPixelCommand{})
 }

@@ -190,6 +190,7 @@ func doLedTest() {
 	pixelBrightness := ledTestFlagSet.Float64("b", 1.0, "Pixel brightness")
 	var neopixelDisplay PixelDisplay
 	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+	ledTestFlagSet.Parse(os.Args[2:])
 
 	colors := []Color{
 		MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
