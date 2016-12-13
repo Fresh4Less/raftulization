@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"math/rand"
 	"strconv"
 	"time"
 )
@@ -75,7 +76,7 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	//begin animation cycle
 	interceptor.matrixMultiFrameView.CycleFrames(
 		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
-		[]time.Duration{time.Second*5, time.Second*5},
+		[]time.Duration{time.Second*5, time.Second*2},
 		[]FrameTransition{Slide, Slide})
 
 	return &interceptor
@@ -106,7 +107,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
 
-		go interceptor.networkDisplays[0].DrawAnimation(animation, calcFps(len(animation)))
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 
 		//if event.Outgoing {
 		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
@@ -181,10 +182,10 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 
 func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent) {
 	interceptor.imageScreen.SetRect(0,0, event.State.(ColorFrame), Error)
-	interceptor.matrixMultiFrameView.CycleFrames(
-		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
-		[]time.Duration{time.Second*5, time.Second*5},
-		[]FrameTransition{Slide, Slide})
+	//interceptor.matrixMultiFrameView.CycleFrames(
+		//[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
+		//[]time.Duration{time.Second*5, time.Second*2},
+		//[]FrameTransition{Slide, Slide})
 }
 
 // moves horizontally only
@@ -194,12 +195,8 @@ func MakeMovingSegmentAnimation(colors ColorFrame, length int) []ColorFrame {
 	for frame := 0; frame < frameCount; frame++ {
 		frames[frame] = MakeColorFrame(length, 1, MakeColor(0,0,0))
 		beginIndex := frame - (len(colors[0])-1)
-		for i, row := range colors {
-			for j, color := range row {
-				if beginIndex+j >= 0 && beginIndex+j < length {
-					frames[frame][i][beginIndex+j] = color
-				}
-			}
+		for i, color := range colors[0] {
+			frames[frame].Set(beginIndex+i,0, color, Clip)
 		}
 	}
 	return frames
@@ -239,12 +236,15 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
 	go func() {
-		reply := raft.StartReply{}
-		success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{1,1,MakeColor(0,255,0)}}, &reply)
-		if success {
-			fmt.Printf("Start hello: %v\n", reply)
-		} else {
-			fmt.Printf("err\n")
+		for true {
+			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
+			reply := raft.StartReply{}
+			success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))}}, &reply)
+			if success {
+				fmt.Printf("Start hello: %v\n", reply)
+			} else {
+				fmt.Printf("err\n")
+			}
 		}
 	}()
 
@@ -293,4 +293,5 @@ var StateColors = map[raft.ServerState]Color{
 
 func init() {
 	gob.Register(SetPixelCommand{})
+	gob.Register(MakeColorFrame(0,0,0))
 }

@@ -242,10 +242,10 @@ func (mfv *MultiFrameView) CycleFrames(frames []*ColorFrame, durations []time.Du
 
 func (mfv *MultiFrameView) UpdateFrame(frame *ColorFrame) {
 	//redraw if visible
-	if (mfv.frames[mfv.currentFrame].frame == frame) ||
-		(mfv.transitioning && mfv.frames[(mfv.currentFrame + 1) % len(mfv.frames)].frame == frame) {
+	//if (mfv.frames[mfv.currentFrame].frame == frame) ||
+		//(mfv.transitioning && mfv.frames[(mfv.currentFrame + 1) % len(mfv.frames)].frame == frame) {
 			mfv.draw()
-	}
+	//}
 }
 
 
@@ -283,7 +283,7 @@ func (mfv *MultiFrameView) beginTransition(frameIndex int, transition FrameTrans
 					mfv.frames[nextFrameIndex].x--
 					mfv.draw()
 					//TODO: don't hardcode transition duration, also the below commented out code is broken
-					time.Sleep(time.Duration(1000/8)*time.Millisecond)
+					time.Sleep(time.Duration(500/8)*time.Millisecond)
 					//time.Sleep(time.Duration(int(time.Duration(duration)/time.Millisecond) / mfv.display.Width)*time.Millisecond)
 				}
 
