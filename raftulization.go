@@ -84,13 +84,15 @@ func doRaft() {
 
 	eventClient := raft.NewUnreliableRpcClient(*eventAddress, 5, time.Second)
 
+	colorState := MakeColorFrame(8,8,MakeColor(0,0,0))
+
 	for true {
 		select {
-		//we don't strictly need this event, because whenever LastApplied is incremented we send a StateUpdatedEvent
-		//however, it's useful enough to know when something is committed that we send these events anyway
 		case applyMsg := <-applyCh:
 			go func() {
-				eventCh <- raft.EntryCommittedEvent{applyMsg}
+				command := applyMsg.Command.(SetPixelCommand)
+				colorState[command.Y][command.X] = command.PixelColor
+				eventCh <- raft.EntryCommittedEvent{applyMsg, colorState}
 			}()
 		case event := <-eventCh:
 			go func() {
@@ -131,6 +133,8 @@ func doIntercept() {
 	eventListenPort := interceptFlagSet.Int("e", 10000, "Event listen port")
 	sourceAddress := interceptFlagSet.String("s", "127.0.0.1:8000", "RAFT source address")
 	pixelsEnabled := interceptFlagSet.Bool("p", false, "Enable pixel displays")
+	pixelBrightness := interceptFlagSet.Float64("b", 1.0, "Pixel brightness (requires -p=true)")
+	isInteractive := interceptFlagSet.Bool("i", false, "Set for interactive mode (requires -p=true)")
 
 	forwardInfo := NetForwardInfoList{}
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
@@ -138,15 +142,26 @@ func doIntercept() {
 
 	var neopixelDisplay PixelDisplay
 	if *pixelsEnabled {
-		neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+		if *isInteractive {
+			neopixelDisplay = NewNeopixelDisplay(18, 64+30+20+64, 255)
+		} else {
+			neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+		}
 	} else {
 		neopixelDisplay = &FakeDisplay{64 + 30 + 20}
 	}
 
-	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, false)
+	brightness := float32(*pixelBrightness)
+
+	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, brightness, false)
 	networkDisplays := []*PixelDisplayView{
-		NewPixelDisplayView(neopixelDisplay, 64, 30, 1, false),
-		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, false),
+		NewPixelDisplayView(neopixelDisplay, 64, 30, 1, brightness, false),
+		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, brightness, false),
+	}
+	var interactiveDisplay *PixelDisplayView
+	if *isInteractive {
+		//TODO: init interactive code
+		interactiveDisplay = NewPixelDisplayView(neopixelDisplay, 64+30+20, 8,8, brightness, false)
 	}
 	//for i := 0; i < 64; i++ {
 	//	neopixelDisplay.Set(i, MakeColor(255,0,0))
@@ -159,25 +174,27 @@ func doIntercept() {
 	//}
 	//neopixelDisplay.Show()
 
-	//matrixDisplay.SetArea(0,0,MakeColorRect(8,8,MakeColor(255,0,0)))
+	//matrixDisplay.SetArea(0,0,MakeColorFrame(8,8,MakeColor(255,0,0)))
 	//matrixDisplay.Draw()
-	//networkDisplays[0].SetArea(0,0,MakeColorRect(30,1,MakeColor(0,255,0)))
+	//networkDisplays[0].SetArea(0,0,MakeColorFrame(30,1,MakeColor(0,255,0)))
 	//networkDisplays[0].Draw()
-	//networkDisplays[1].SetArea(0,0,MakeColorRect(20,1,MakeColor(0,0,255)))
+	//networkDisplays[1].SetArea(0,0,MakeColorFrame(20,1,MakeColor(0,0,255)))
 	//networkDisplays[1].Draw()
 
-	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays)
+	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay)
 	select{}
 }
 
 func doLedTest() {
+	ledTestFlagSet := flag.NewFlagSet("", flag.ExitOnError)
+	pixelBrightness := ledTestFlagSet.Float64("b", 1.0, "Pixel brightness")
 	var neopixelDisplay PixelDisplay
 	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
 
 	colors := []Color{
-		MakeColor(255,0,0),
-		MakeColor(0,255,0),
-		MakeColor(0,0,255),
+		MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
+		MakeColor(0, uint32(*pixelBrightness*float64(255)), 0),
+		MakeColor(0, 0, uint32(*pixelBrightness*float64(255))),
 	}
 
 	t := 0
@@ -199,7 +216,7 @@ func doLedTest() {
 	//neopixelDisplay := &FakeDisplay{30}
 	//matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 30, 1, false)
 
-	//colors := MakeColorRect(5,1, MakeColor(0,0,0))
+	//colors := MakeColorFrame(5,1, MakeColor(0,0,0))
 	//colors[0][len(colors[0])-1] = MakeColor(255,0,0)
 	//for i := 0; i < len(colors[0])-1; i++ {
 		//colors[0][i] = MakeColor(0,255,0)

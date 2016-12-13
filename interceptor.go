@@ -33,11 +33,17 @@ type Interceptor struct {
 	listener        *net.Listener
 	rpcServer       *rpc.Server
 	raftHandlers    []*RaftHandler
+
 	matrixDisplay   *PixelDisplayView
 	networkDisplays []*PixelDisplayView
+	interactiveDisplay *PixelDisplayView
+
+	raftStateScreen ColorFrame
+	imageScreen ColorFrame
+	matrixMultiFrameView *MultiFrameView
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()
@@ -58,6 +64,18 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 
 	interceptor.matrixDisplay = matrixDisplay
 	interceptor.networkDisplays = networkDisplays
+	interceptor.interactiveDisplay = interactiveDisplay
+
+	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
+	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
+
+	interceptor.matrixMultiFrameView = MakeMultiFrameView(matrixDisplay)
+	
+	//begin animation cycle
+	interceptor.matrixMultiFrameView.CycleFrames(
+		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
+		[]time.Duration{time.Second*5, time.Second*5},
+		[]FrameTransition{Slide, Slide})
 
 	return &interceptor
 }
@@ -71,14 +89,15 @@ func (interceptor *Interceptor) OnEvent(event raft.RaftEvent, reply *bool) error
 func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	switch event := event.(type) {
 	case raft.StateUpdatedEvent:
-		interceptor.updateStateDisplay(event)
+		interceptor.onStateUpdated(event)
 	case raft.EntryCommittedEvent:
+		interceptor.onEntryCommitted(event)
 	case raft.SetElectionTimeoutEvent:
 		//fmt.Printf("SetElectionTimeout: %v\n", event.Duration)
 	case raft.SetHeartbeatTimeoutEvent:
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
-		colors := MakeColorRect(1,1 + len(event.Args.Entries), MakeColor(0,0,0))
+		colors := MakeColorFrame(1,1 + len(event.Args.Entries), MakeColor(0,0,0))
 		colors[0][len(colors[0])-1] = MakeColor(255,0,0)
 		for i := 0; i < len(colors[0])-1; i++ {
 			colors[0][i] = event.Args.Entries[i].Command.(SetPixelCommand).PixelColor
@@ -86,7 +105,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
 
-		go interceptor.networkDisplays[0].DrawAnimation(0,0,animation, calcFps(len(animation)))
+		go interceptor.networkDisplays[0].DrawAnimation(animation, calcFps(len(animation)))
 
 		//if event.Outgoing {
 		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
@@ -129,10 +148,39 @@ func calcFps(frameCount int) float32 {
 }
 
 
-func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent) {
+func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
+	interceptor.raftStateScreen.SetAll(MakeColor(0,0,0))
+	//id TODO don't hardcode this
+	interceptor.raftStateScreen.SetRect(0, 0, MakeColorFrame(2, 2, MakeColor(255, 0, 0)), Error)
+	// voted for TODO
+	//VotedFor int
+	// received votes TODO: use id colors instead of just counting
+	for i, voted := range event.ReceivedVotes {
+		if voted {
+			interceptor.raftStateScreen.Set(2+(i%4), 1, MakeColor(255, 200, 0), Error)
+		}
+	}
+	// state
+	interceptor.raftStateScreen.SetRect(6, 0, MakeColorFrame(2, 2, StateColors[event.State]), Error)
+	// logs
+	for i, log := range event.RecentLogs {
+		if setPixelCommand, ok := log.Command.(SetPixelCommand); ok {
+			//TODO: use last applied to display committed logs differently than uncommitted
+			//LastApplied int
+			//LogLength int
+			interceptor.raftStateScreen.SetRect(2, i+8-len(event.RecentLogs), MakeColorFrame(1, 2, setPixelCommand.PixelColor), Error)
+		}
+	}
+	// term
+	interceptor.raftStateScreen.SetRect(0, 5, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
+	interceptor.raftStateScreen.SetRect(3, 5, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
+	interceptor.raftStateScreen.SetRect(6, 5, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
+	interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
+	//interceptor.matrixDisplay.Draw()
+	/*
 	interceptor.matrixDisplay.Reset()
 	//id TODO don't hardcode this
-	interceptor.matrixDisplay.SetArea(0, 0, MakeColorRect(2, 2, MakeColor(255, 0, 0)))
+	interceptor.matrixDisplay.SetArea(0, 0, MakeColorFrame(2, 2, MakeColor(255, 0, 0)))
 	// voted for TODO
 	//VotedFor int
 	// received votes TODO: use id colors instead of just counting
@@ -142,14 +190,14 @@ func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent)
 		}
 	}
 	// state
-	interceptor.matrixDisplay.SetArea(0, 6, MakeColorRect(2, 2, StateColors[event.State]))
+	interceptor.matrixDisplay.SetArea(0, 6, MakeColorFrame(2, 2, StateColors[event.State]))
 	// logs
 	for i, log := range event.RecentLogs {
 		if img, ok := log.Command.([][]Color); ok {
 			//TODO: use last applied to display committed logs differently than uncommitted
 			//LastApplied int
 			//LogLength int
-			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorRect(1, 2, averageColor(img)))
+			interceptor.matrixDisplay.SetArea(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 2, averageColor(img)))
 		}
 	}
 	// term
@@ -157,14 +205,23 @@ func (interceptor *Interceptor) updateStateDisplay(event raft.StateUpdatedEvent)
 	interceptor.matrixDisplay.SetArea(5, 3, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
 	interceptor.matrixDisplay.SetArea(5, 6, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)))
 	interceptor.matrixDisplay.Draw()
+	*/
+}
+
+func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent) {
+	interceptor.imageScreen.SetRect(0,0, event.State.(ColorFrame), Error)
+	interceptor.matrixMultiFrameView.CycleFrames(
+		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
+		[]time.Duration{time.Second*5, time.Second*5},
+		[]FrameTransition{Slide, Slide})
 }
 
 // moves horizontally only
-func MakeMovingSegmentAnimation(colors [][]Color, length int) [][][]Color {
+func MakeMovingSegmentAnimation(colors ColorFrame, length int) []ColorFrame {
 	frameCount := len(colors[0])+ length-1
-	frames := make([][][]Color, frameCount)
+	frames := make([]ColorFrame, frameCount)
 	for frame := 0; frame < frameCount; frame++ {
-		frames[frame] = MakeColorRect(length, 1, MakeColor(0,0,0))
+		frames[frame] = MakeColorFrame(length, 1, MakeColor(0,0,0))
 		beginIndex := frame - (len(colors[0])-1)
 		for i, row := range colors {
 			for j, color := range row {
@@ -175,24 +232,6 @@ func MakeMovingSegmentAnimation(colors [][]Color, length int) [][][]Color {
 		}
 	}
 	return frames
-}
-
-// this just returns averages of the RGB channels, probably should make it return full saturation & value or something
-func averageColor(colors [][]Color) Color {
-	rTotal := uint32(0)
-	gTotal := uint32(0)
-	bTotal := uint32(0)
-	count := uint32(0)
-	for _, row := range colors {
-		for _, color := range row {
-			rTotal += color.GetRed()
-			gTotal += color.GetGreen()
-			bTotal += color.GetBlue()
-			count++
-		}
-	}
-
-	return MakeColor(rTotal/count, gTotal/count, bTotal/count)
 }
 
 func nthDigit(a, n int) int {

@@ -21,6 +21,7 @@ type StateUpdatedEvent struct {
 
 type EntryCommittedEvent struct {
 	ApplyMsg ApplyMsg
+	State interface{} //new state of application as a result of this commit
 }
 
 type SetElectionTimeoutEvent struct {
