@@ -236,7 +236,7 @@ func (mfv *MultiFrameView) CycleFrames(frames []*ColorFrame, durations []time.Du
 		mfv.frames[i].transition = transitions[i]
 	}
 
-	mfv.beginTransition(0, 0, None)
+	mfv.beginTransition(0, None)
 }
 
 
@@ -249,26 +249,31 @@ func (mfv *MultiFrameView) UpdateFrame(frame *ColorFrame) {
 }
 
 
-func (mfv *MultiFrameView) beginTransition(frameIndex int, duration time.Duration, transition FrameTransition) {
-	fmt.Printf("begin transition %v\n", frameIndex)
+func (mfv *MultiFrameView) beginTransition(frameIndex int, transition FrameTransition) {
 	mfv.transitionIndex++
 	transitionIndex := mfv.transitionIndex
 	mfv.currentFrame = frameIndex
 	mfv.frames[frameIndex].x = 0
 	mfv.frames[frameIndex].y = 0
+	nextFrameIndex := (frameIndex + 1) % len(mfv.frames)
 
 	switch transition {
 		case None:
 		mfv.transitioning = false
+		//cycle to next (we should do this elsewhere)
+		go func() {
+			time.Sleep(mfv.frames[mfv.currentFrame].duration)
+			if mfv.transitionIndex == transitionIndex {
+				mfv.beginTransition(nextFrameIndex, mfv.frames[mfv.currentFrame].transition)
+			}
+		}()
 		case Slide:
-			nextFrameIndex := (frameIndex + 1) % len(mfv.frames)
 			//for now just transition left to right
 			mfv.frames[nextFrameIndex].x = mfv.display.Width
 			mfv.frames[nextFrameIndex].y = 0
 			mfv.transitioning = true
 			go func() {
-				for i := 0; i < mfv.display.Width; i++ {
-					time.Sleep(time.Duration(int(duration/time.Millisecond) / mfv.display.Width)*time.Millisecond)
+				for i := 0; i < mfv.display.Width-1; i++ {
 					if mfv.transitionIndex != transitionIndex {
 						//someone else started a transition while we were sleeping--cancel the rest of this transition
 						return
@@ -277,11 +282,22 @@ func (mfv *MultiFrameView) beginTransition(frameIndex int, duration time.Duratio
 					mfv.frames[frameIndex].x--
 					mfv.frames[nextFrameIndex].x--
 					mfv.draw()
+					//TODO: don't hardcode transition duration, also the below commented out code is broken
+					time.Sleep(time.Duration(1000/8)*time.Millisecond)
+					//time.Sleep(time.Duration(int(time.Duration(duration)/time.Millisecond) / mfv.display.Width)*time.Millisecond)
 				}
 
-				mfv.currentFrame = nextFrameIndex
+				//don't sleep on last frame
+				mfv.frames[frameIndex].x--
+				mfv.frames[nextFrameIndex].x--
+				mfv.draw()
+
 				mfv.transitioning = false
-				mfv.beginTransition(mfv.currentFrame, mfv.frames[mfv.currentFrame].duration, mfv.frames[mfv.currentFrame].transition)
+				//cycle to next (we should do this elsewhere)
+				time.Sleep(mfv.frames[mfv.currentFrame].duration)
+				if mfv.transitionIndex == transitionIndex {
+					mfv.beginTransition(nextFrameIndex, mfv.frames[mfv.currentFrame].transition)
+				}
 			}()
 
 	}
@@ -289,14 +305,16 @@ func (mfv *MultiFrameView) beginTransition(frameIndex int, duration time.Duratio
 }
 
 func (mfv *MultiFrameView) draw() {
+	newFrame := MakeColorFrame(mfv.display.Width, mfv.display.Height, MakeColor(0,0,0))
+
 	frame := mfv.frames[mfv.currentFrame]
-	mfv.display.Colors.SetRect(frame.x, frame.y, *frame.frame, Clip)
+	newFrame.SetRect(frame.x, frame.y, *frame.frame, Clip)
 	if mfv.transitioning {
 		//draw next frame
 		nextFrame := mfv.frames[(mfv.currentFrame + 1) % len(mfv.frames)]
-		mfv.display.Colors.SetRect(nextFrame.x, nextFrame.y, *nextFrame.frame, Clip)
+		newFrame.SetRect(nextFrame.x, nextFrame.y, *nextFrame.frame, Clip)
 	}
-	fmt.Printf("draw %v\n", mfv.display.Colors)
+	mfv.display.SetFrame(newFrame)
 	mfv.display.Draw()
 }
 
