@@ -107,6 +107,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
 
+		fmt.Println(calcFps(len(animation)))
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 
 		//if event.Outgoing {

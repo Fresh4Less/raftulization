@@ -193,6 +193,15 @@ func doLedTest() {
 	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
 	ledTestFlagSet.Parse(os.Args[2:])
 
+	white := MakeColor(255,255,255)
+	fmt.Printf("%v, %v, %v\n", white.GetRed(), white.GetGreen(), white.GetBlue())
+	red := MakeColor(255,0,0)
+	fmt.Printf("%v, %v, %v\n", red.GetRed(), red.GetGreen(), red.GetBlue())
+	green := MakeColor(0,255,0)
+	fmt.Printf("%v, %v, %v\n", green.GetRed(), green.GetGreen(), green.GetBlue())
+	blue := MakeColor(0,0,255)
+	fmt.Printf("%v, %v, %v\n", blue.GetRed(), blue.GetGreen(), blue.GetBlue())
+
 	colors := []Color{
 		MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
 		MakeColor(0, uint32(*pixelBrightness*float64(255)), 0),

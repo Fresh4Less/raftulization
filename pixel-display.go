@@ -65,7 +65,7 @@ func (pd *PixelDisplayView) DrawAnimation(frames []ColorFrame, fps float32) {
 	for _, frame := range frames {
 		pd.SetFrame(frame)
 		pd.Draw()
-		time.Sleep(time.Second / (time.Duration(fps)*time.Second))
+		time.Sleep(time.Duration(1000.0/fps)*time.Millisecond)
 	}
 }
 
@@ -73,15 +73,15 @@ func (pd *PixelDisplayView) DrawAnimation(frames []ColorFrame, fps float32) {
 type Color uint32
 
 func (color Color) GetRed() uint32 {
-	return uint32((color >> 8) & (2<<8 - 1))
+	return uint32((color >> 8) & (1<<8 - 1))
 }
 
 func (color Color) GetGreen() uint32 {
-	return uint32((color >> 16) & (2<<8 - 1))
+	return uint32((color >> 16) & (1<<8 - 1))
 }
 
 func (color Color) GetBlue() uint32 {
-	return uint32(color & (2<<8 - 1))
+	return uint32(color & (1<<8 - 1))
 }
 
 //func (color Color) GetWhite() uint32 {
@@ -178,14 +178,26 @@ func (fd *FakeDisplay) Count() int {
 
 type NeopixelDisplay struct {
 	count int
+	cooloffTimer *time.Timer
+	timerRunning bool
+	renderAfterTimer bool
 }
 
+const DisplayCooloffTime = 5*time.Millisecond
+
+//interface to the neopixel API
 func NewNeopixelDisplay(gpioPin, ledCount, brightness int) *NeopixelDisplay {
 	err := ws2811.Init(gpioPin, ledCount, brightness)
 	if err != nil {
 		panic(err)
 	}
-	display := NeopixelDisplay{ledCount}
+	display := NeopixelDisplay{ledCount, time.NewTimer(DisplayCooloffTime), false, false}
+	//go func() {
+		//for true {
+			//display.render()
+			//time.Sleep(5*time.Millisecond)
+		//}
+	//}()
 	return &display
 }
 
@@ -199,11 +211,30 @@ func (nd *NeopixelDisplay) Set(index int, color Color) {
 }
 
 func (nd *NeopixelDisplay) Show() {
+	if nd.timerRunning {
+		if !nd.renderAfterTimer {
+			nd.renderAfterTimer = true
+			go func() {
+				<-nd.cooloffTimer.C
+				nd.render()
+			}()
+		}
+	} else {
+	nd.render()
+	}
+}
+
+func (nd *NeopixelDisplay) render() {
 	//fmt.Printf("render\n")
 	err := ws2811.Render()
 	if err != nil {
 		panic(err)
 	}
+
+	//set timer
+	nd.cooloffTimer.Reset(DisplayCooloffTime)
+	nd.timerRunning = true
+	nd.renderAfterTimer = false
 }
 
 /********** MultiFrameView ***********/
