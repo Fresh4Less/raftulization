@@ -90,9 +90,10 @@ func doRaft() {
 		select {
 		case applyMsg := <-applyCh:
 			go func() {
-				command := applyMsg.Command.(SetPixelCommand)
-				colorState[command.Y][command.X] = command.PixelColor
-				eventCh <- raft.EntryCommittedEvent{applyMsg, colorState}
+				if command, ok := applyMsg.Command.(SetPixelCommand); ok {
+					colorState[command.Y][command.X] = command.PixelColor
+					eventCh <- raft.EntryCommittedEvent{applyMsg, colorState}
+				}
 			}()
 		case event := <-eventCh:
 			go func() {
@@ -198,11 +199,25 @@ func doLedTest() {
 		MakeColor(0, 0, uint32(*pixelBrightness*float64(255))),
 	}
 
+	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, float32(*pixelBrightness), false)
+	multiDisplay := NewMultiFrameView(matrixDisplay)
+	screens := make([]ColorFrame, 2)
+	screens[0] = MakeColorFrame(8,8, MakeColor(0,0,0))
+	screens[1] = MakeColorFrame(8,8, MakeColor(255,255,255))
+	//screens[2] = MakeColorFrame(8,8, MakeColor(255,0,0))
+
+	multiDisplay.CycleFrames(
+		[]*ColorFrame{&screens[0],&screens[1]},
+		[]time.Duration{time.Second*5, time.Second*5},
+		[]FrameTransition{Slide, Slide})
+
 	t := 0
 	for true {
-		for i := 0; i < 64; i++ {
-			neopixelDisplay.Set(i, colors[t%3])
-		}
+		screens[t%len(screens)].SetRect(0,0, MakeColorNumberChar(t%10, MakeColor(255,0,0), MakeColor(0,0,0)), Error)
+		multiDisplay.UpdateFrame(&screens[t%len(screens)])
+		//for i := 0; i < 64; i++ {
+			//neopixelDisplay.Set(i, colors[t%3])
+		//}
 		for i := 64; i < 64+30; i++ {
 			neopixelDisplay.Set(i, colors[(t+1)%3])
 		}

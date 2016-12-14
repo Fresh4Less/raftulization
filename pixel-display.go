@@ -40,17 +40,23 @@ func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
 			pd.Display.Set(pd.Offset+pd.Height*i+j, pd.Colors[i][j])
-			//if pd.Colors[i][j] == 0 {
-				//fmt.Printf("*")
-			//} else if pd.Colors[i][j] == MakeColor(255,0,0) {
-				//fmt.Printf("x")
-			//} else {
-				//fmt.Printf("0")
+			//if pd.Width == 8 {
+				//if pd.Colors[i][j] == 0 {
+					//fmt.Printf("*")
+				//} else if pd.Colors[i][j] == MakeColor(255,255,255) {
+					//fmt.Printf("x")
+				//} else {
+					//fmt.Printf("0")
+				//}
 			//}
 		}
-		//fmt.Printf("\n")
+		//if pd.Width == 8 {
+			//fmt.Printf("\n")
+		//}
 	}
-	//fmt.Printf("\n")
+	//if pd.Width == 8 {
+		//fmt.Printf("\n")
+	//}
 	pd.Display.Show()
 }
 
@@ -116,8 +122,12 @@ func (c ColorFrame) Set(x, y int, color Color, overflowMode ColorOverflowMode) {
 	if y < 0 || x < 0 || y >= len(c) || x >= len(c[y]) {
 		switch overflowMode {
 			case Error:
+				width := "?"
+				if y >= 0 && y < len(c) {
+					width = fmt.Sprintf("%v", len(c))
+				}
 				panic(fmt.Sprintf("ColorFrame.Set: tried to set (%v,%v) but the frame has dimensions (%v,%v)",
-					x, y, len(c[y]), len(c)))
+					x, y, width, len(c)))
 			case Clip:
 				return
 			case Wrap:
@@ -213,7 +223,7 @@ type MultiFrameView struct {
 	}
 }
 
-func MakeMultiFrameView(display *PixelDisplayView) *MultiFrameView {
+func NewMultiFrameView(display *PixelDisplayView) *MultiFrameView {
 	return &MultiFrameView{display, 0, false, 0, nil}
 }
 
@@ -252,55 +262,43 @@ func (mfv *MultiFrameView) UpdateFrame(frame *ColorFrame) {
 func (mfv *MultiFrameView) beginTransition(frameIndex int, transition FrameTransition) {
 	mfv.transitionIndex++
 	transitionIndex := mfv.transitionIndex
-	mfv.currentFrame = frameIndex
-	mfv.frames[frameIndex].x = 0
-	mfv.frames[frameIndex].y = 0
-	nextFrameIndex := (frameIndex + 1) % len(mfv.frames)
 
-	switch transition {
+	beginIndex := (((frameIndex-1)%len(mfv.frames))+ len(mfv.frames)) % len(mfv.frames) //double modulus prevents negative index
+
+	mfv.frames[beginIndex].x = 0
+	mfv.frames[beginIndex].y = 0
+
+	mfv.transitioning = true
+	// async transition
+	go func() {
+		switch transition {
 		case None:
-		mfv.transitioning = false
-		//cycle to next (we should do this elsewhere)
-		go func() {
-			time.Sleep(mfv.frames[mfv.currentFrame].duration)
-			if mfv.transitionIndex == transitionIndex {
-				mfv.beginTransition(nextFrameIndex, mfv.frames[mfv.currentFrame].transition)
-			}
-		}()
+			mfv.frames[frameIndex].x = 0
 		case Slide:
 			//for now just transition left to right
-			mfv.frames[nextFrameIndex].x = mfv.display.Width
-			mfv.frames[nextFrameIndex].y = 0
-			mfv.transitioning = true
-			go func() {
-				for i := 0; i < mfv.display.Width-1; i++ {
-					if mfv.transitionIndex != transitionIndex {
-						//someone else started a transition while we were sleeping--cancel the rest of this transition
-						return
-					}
-
-					mfv.frames[frameIndex].x--
-					mfv.frames[nextFrameIndex].x--
-					mfv.draw()
-					//TODO: don't hardcode transition duration, also the below commented out code is broken
-					time.Sleep(time.Duration(500/8)*time.Millisecond)
-					//time.Sleep(time.Duration(int(time.Duration(duration)/time.Millisecond) / mfv.display.Width)*time.Millisecond)
-				}
-
-				//don't sleep on last frame
+			mfv.frames[frameIndex].x = mfv.display.Width
+			for i := 0; i < mfv.display.Width; i++ {
+				mfv.frames[beginIndex].x--
 				mfv.frames[frameIndex].x--
-				mfv.frames[nextFrameIndex].x--
 				mfv.draw()
 
-				mfv.transitioning = false
-				//cycle to next (we should do this elsewhere)
-				time.Sleep(mfv.frames[mfv.currentFrame].duration)
-				if mfv.transitionIndex == transitionIndex {
-					mfv.beginTransition(nextFrameIndex, mfv.frames[mfv.currentFrame].transition)
+				//TODO: don't hardcode transition duration
+				time.Sleep(time.Duration(500/8)*time.Millisecond)
+				if mfv.transitionIndex != transitionIndex {
+					//someone else started a transition while we were sleeping--cancel the rest of this transition
+					return
 				}
-			}()
-
-	}
+			}
+		}
+		//transition done, sleep until next cycle
+		mfv.transitioning = false
+		mfv.currentFrame = frameIndex
+		time.Sleep(mfv.frames[frameIndex].duration)
+		if mfv.transitionIndex == transitionIndex {
+			nextFrameIndex := (frameIndex+1)%len(mfv.frames)
+			mfv.beginTransition(nextFrameIndex, mfv.frames[nextFrameIndex].transition)
+		}
+	}()
 	mfv.draw()
 }
 
@@ -314,6 +312,7 @@ func (mfv *MultiFrameView) draw() {
 		nextFrame := mfv.frames[(mfv.currentFrame + 1) % len(mfv.frames)]
 		newFrame.SetRect(nextFrame.x, nextFrame.y, *nextFrame.frame, Clip)
 	}
+
 	mfv.display.SetFrame(newFrame)
 	mfv.display.Draw()
 }

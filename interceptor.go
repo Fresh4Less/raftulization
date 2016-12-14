@@ -69,14 +69,14 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	interceptor.interactiveDisplay = interactiveDisplay
 
 	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
-	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
+	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(255,255,255))
 
-	interceptor.matrixMultiFrameView = MakeMultiFrameView(matrixDisplay)
+	interceptor.matrixMultiFrameView = NewMultiFrameView(matrixDisplay)
 	
 	//begin animation cycle
 	interceptor.matrixMultiFrameView.CycleFrames(
 		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
-		[]time.Duration{time.Second*5, time.Second*2},
+		[]time.Duration{time.Second*2, time.Second*5},
 		[]FrameTransition{Slide, Slide})
 
 	return &interceptor
@@ -182,6 +182,7 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 
 func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent) {
 	interceptor.imageScreen.SetRect(0,0, event.State.(ColorFrame), Error)
+	interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.imageScreen)
 	//interceptor.matrixMultiFrameView.CycleFrames(
 		//[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
 		//[]time.Duration{time.Second*5, time.Second*2},
