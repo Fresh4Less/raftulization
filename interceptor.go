@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
 	"net"
@@ -418,39 +419,42 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 /*** RAFT RPCs **/
 func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.RequestVoteReply) error {
 	rh.interceptor.OnEventHandler(raft.RequestVoteEvent{args, rh.peer, rh.outgoing})
-	if rh.enabled {
+	if !rh.enabled {
+		return errors.New("RPC Dropped")
+	}
+	time.Sleep(NetworkForwardDelay)
+	success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
+	if success {
+		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
-		success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
-		if success {
-			rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
-			time.Sleep(NetworkForwardDelay)
-		}
 	}
 	return nil
 }
 
 func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.AppendEntriesReply) error {
 	rh.interceptor.OnEventHandler(raft.AppendEntriesEvent{args, rh.peer, rh.outgoing})
-	if rh.enabled {
+	if !rh.enabled {
+		return errors.New("RPC Dropped")
+	}
+	time.Sleep(NetworkForwardDelay)
+	success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
+	if success {
+		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
-		success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
-		if success {
-			rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
-			time.Sleep(NetworkForwardDelay)
-		}
 	}
 	return nil
 }
 
 func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error {
 	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
-	if rh.enabled {
+	if !rh.enabled {
+		return errors.New("RPC Dropped")
+	}
+	time.Sleep(NetworkForwardDelay)
+	success := rh.forwardClient.Call("Raft.Start", args, reply)
+	if success {
+		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
-		success := rh.forwardClient.Call("Raft.Start", args, reply)
-		if success {
-			rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
-			time.Sleep(NetworkForwardDelay)
-		}
 	}
 	return nil
 }
