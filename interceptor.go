@@ -17,7 +17,7 @@ import (
 // for each remote peer we listen on a separate "source" and "remote" port
 // This means that for each remote peer we create two RaftHandlers
 
-const NetworkForwardDelay = time.Millisecond * 700
+const NetworkForwardDelay = time.Millisecond * 1500
 
 //colors
 var StateColors = map[raft.ServerState]Color{
@@ -31,6 +31,8 @@ var RpcColors = map[string]Color {
 	"AppendEntriesResponse": MakeColor(255,165,0),
 	"RequestVote": MakeColor(0,0,255),
 	"RequestVoteResponse": MakeColor(0,165,255),
+	"StartEvent": MakeColor(0,255,0),
+	"StartEventResponse": MakeColor(165,255,0),
 }
 
 type NetForwardInfo struct {
@@ -76,8 +78,8 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 
 	for i, info := range forwardInfo {
 		interceptor.raftHandlers = append(interceptor.raftHandlers,
-			NewRaftHandler(&interceptor, info.SourceListenPort, info.ForwardAddress, i, true),
-			NewRaftHandler(&interceptor, info.RemoteListenPort, sourceAddress, i, false))
+			NewRaftHandler(&interceptor, info.SourceListenPort, info.ForwardAddress, i, false),
+			NewRaftHandler(&interceptor, info.RemoteListenPort, sourceAddress, i, true))
 	}
 
 	interceptor.matrixDisplay = matrixDisplay
@@ -119,15 +121,18 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.SetHeartbeatTimeoutEvent:
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
-		colors := MakeColorFrame(1 + len(event.Args.Entries), 1, RpcColors["AppendEntries"])
-		for i := 0; i < len(colors[0])-1; i++ {
+		colors := MakeColorFrame(3 + len(event.Args.Entries), 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["AppendEntries"], Error)
+		for i := 0; i < len(colors[0])-3; i++ {
 			colors.Set(i,0, event.Args.Entries[i].Command.(SetPixelCommand).PixelColor, Error)
 		}
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 	case raft.AppendEntriesResponseEvent:
-		colors := MakeColorFrame(2, 1, RpcColors["AppendEntriesResponse"])
+		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["AppendEntriesResponse"], Error)
 		if event.Reply.Success {
 			colors.Set(0,0, MakeColor(0,255,0), Error)
 		} else {
@@ -136,14 +141,18 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
+
 	case raft.RequestVoteEvent:
-		colors := MakeColorFrame(2, 1, RpcColors["RequestVote"])
+		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["RequestVote"], Error)
 		colors.Set(0,0, interceptor.idColor, Error)
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
+
 	case raft.RequestVoteResponseEvent:
-		colors := MakeColorFrame(2, 1, RpcColors["RequestVote"])
+		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["RequestVoteResponse"], Error)
 		if event.Reply.VoteGranted {
 			colors.Set(0,0, MakeColor(0,255,0), Error)
 		} else {
@@ -152,6 +161,29 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
+
+	case raft.StartEvent:
+		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["StartEvent"], Error)
+		if command, ok := event.Args.Command.(SetPixelCommand); ok {
+			colors.Set(0,0, command.PixelColor, Error)
+		}
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
+
+	case raft.StartResponseEvent:
+		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
+		colors.Set(len(colors[0])-2, 0, RpcColors["StartEventResponse"], Error)
+		if event.Reply.IsLeader {
+			colors.Set(0,0, MakeColor(0,255,0), Error)
+		} else {
+			colors.Set(0,0, MakeColor(255,0,0), Error)
+		}
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
+
 	default:
 		fmt.Printf("Unexpected type %T\n", event)
 	}
@@ -211,7 +243,11 @@ func MakeMovingSegmentAnimation(colors ColorFrame, length int, reverseDirection 
 		if reverseDirection {
 			beginIndex = length-1 - frame
 		}
-		for i, color := range colors[0] {
+		for i := range colors[0] {
+			color := colors[0][i]
+			if reverseDirection {
+				color = colors[0][len(colors[0])-1-i]
+			}
 			frames[frame].Set(beginIndex+i,0, color, Clip)
 		}
 	}
@@ -273,7 +309,7 @@ func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.Reques
 	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
 	if success {
-		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, rh.outgoing})
+		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
@@ -284,7 +320,7 @@ func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.Ap
 	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
 	if success {
-		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, rh.outgoing})
+		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
@@ -295,7 +331,7 @@ func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error 
 	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
 	success := rh.forwardClient.Call("Raft.Start", args, reply)
 	if success {
-		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, rh.outgoing})
+		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
 		time.Sleep(NetworkForwardDelay)
 	}
 	return nil

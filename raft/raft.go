@@ -116,8 +116,8 @@ type Log struct {
 	Command interface{}
 }
 
-const MinElectionTimeout = time.Millisecond * 2000
-const HeartbeatTimeout = time.Millisecond * 1500
+const MinElectionTimeout = time.Second * 4
+const HeartbeatTimeout = time.Second * 3
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -594,7 +594,7 @@ func (rf *Raft) ResetElectionTimer() {
 	if !rf.electionTimer.Stop() && len(rf.electionTimer.C) != 0 {
 		<-rf.electionTimer.C
 	}
-	time := MinElectionTimeout + time.Duration(rf.rng.Intn(int(MinElectionTimeout)))
+	time := MinElectionTimeout + time.Duration(rf.rng.Int63n(int64(MinElectionTimeout)))
 	rf.electionTimer.Reset(time)
 	rf.sendEvent(SetElectionTimeoutEvent{time})
 }
