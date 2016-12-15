@@ -67,6 +67,8 @@ type Interceptor struct {
 	s1Data	chan int
 	s2Data	chan int
 	interactiveChans	*InteractiveChannels
+
+	interactivePanel	*InteractivePanel
 }
 
 func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels) *Interceptor {
@@ -113,6 +115,10 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	interceptor.s2Data = s2Data
 	interceptor.interactiveChans = interactiveChans
 
+	if(interactiveChans != nil) {
+		interceptor.interactivePanel = NewInteractivePanel(8,8)
+	}
+	
 	interceptor.HandleInteractive()
 		
 	return &interceptor
@@ -143,7 +149,54 @@ func (interceptor *Interceptor) HandleInteractive() {
 	}
 	
 	if interceptor.interactiveChans != nil {
-		//TODO
+	
+		go func() {
+			for true {
+				turnedLeft := (<-interceptor.interactiveChans.rotaryL == 0)
+				if turnedLeft {
+					interceptor.interactivePanel.MoveLeft()
+				} else {
+					interceptor.interactivePanel.MoveRight()
+				}
+				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
+				interceptor.interactiveDisplay.Draw()
+			}
+		}()
+		go func() {
+			for true {
+				turnedLeft := (<-interceptor.interactiveChans.rotaryM == 0)
+				if turnedLeft {
+					interceptor.interactivePanel.MoveDown()
+				} else {
+					interceptor.interactivePanel.MoveUp()
+				}
+				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
+				interceptor.interactiveDisplay.Draw()
+			}
+		}()
+		
+		go func() {
+			for true {
+				turnedLeft := (<-interceptor.interactiveChans.rotaryR == 0)
+				if turnedLeft {
+					interceptor.interactivePanel.DecrementHue()
+				} else {
+					interceptor.interactivePanel.IncrementHue()
+				}
+				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
+				interceptor.interactiveDisplay.Draw()
+			}
+		}()
+	
+		go func() {
+			for true {
+				bigButtonPressed := (<-interceptor.interactiveChans.buttonBig == 0)
+				if bigButtonPressed {
+					fmt.Println("Button PRESSED!!!!")
+				}
+			}
+		}()
+		//TODO: do something with pressing in the 3 rotary encoders.
 	}
 
 }
