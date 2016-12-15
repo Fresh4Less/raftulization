@@ -9,7 +9,7 @@ import (
 
 var (
 	initialized     = false
-	refreshRate     = 200 //Milliseconds
+	refreshRate     = 100 //Milliseconds
 	watchedSwitches = []*switchPin{}
 )
 

@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
+	"github.com/fresh4less/raftulization/switchIO"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -61,9 +62,15 @@ type Interceptor struct {
 	networkMultiAnimViews []*MultiAnimationView
 	matrixMultiFrameView *MultiFrameView
 	idColor Color
+	
+	networksEnabled []bool
+	
+	s1Data	chan int
+	s2Data	chan int
+	interactiveChans	*InteractiveChannels
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()
@@ -101,7 +108,45 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 		[]time.Duration{time.Second*2, time.Second*5},
 		[]FrameTransition{Slide, Slide})
 
+	interceptor.networksEnabled = make([]bool,len(interceptor.networkDisplays))
+		
+	interceptor.s1Data = s1Data
+	interceptor.s2Data = s2Data
+	interceptor.interactiveChans = interactiveChans
+		
 	return &interceptor
+}
+
+func (interceptor *Interceptor) HandleInteractive() {
+{
+	if interceptor.s1Data != nil {
+		go func() {
+			for true {
+				enabled := (<- interceptor.s1Data) == 0
+				interceptor.networksEnabled[0] = enabled
+				interceptor.raftHandlers[0].enabled = enabled
+				interceptor.raftHandlers[1].enabled = enabled
+				fmt.Printf("Network 0 %v\n", enabled)
+			}
+		}()
+	}
+	
+	if interceptor.s2Data != nil {
+		go func() {
+			for true {
+				enabled := (<- interceptor.s2Data) == 0		
+				interceptor.networksEnabled[1] = enabled
+				interceptor.raftHandlers[2].enabled = enabled
+				interceptor.raftHandlers[3].enabled = enabled
+				fmt.Printf("Network 1 %v\n", enabled)
+			}
+		}()
+	}
+	
+	if interceptor.interactiveChans != nil {
+		//TODO
+	}
+
 }
 
 /*** RAFT events RPC ***/
@@ -268,6 +313,7 @@ type RaftHandler struct {
 	forwardClient *raft.UnreliableRpcClient
 	peer          int
 	outgoing      bool
+	enabled bool
 }
 
 func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress string, peer int, outgoing bool) *RaftHandler {
@@ -276,6 +322,7 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	rh.interceptor = interceptor
 	rh.peer = peer
 	rh.outgoing = outgoing
+	rh.enabled = false
 	rh.rpcServer = rpc.NewServer()
 	rh.rpcServer.RegisterName("Raft", &rh)
 
@@ -289,13 +336,15 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
 	go func() {
 		for true {
-			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
-			reply := raft.StartReply{}
-			success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))}}, &reply)
-			if success {
-				fmt.Printf("Start hello: %v\n", reply)
-			} else {
-				fmt.Printf("err\n")
+			if rh.enabled {
+				time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
+				reply := raft.StartReply{}
+				success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))}}, &reply)
+				if success {
+					fmt.Printf("Start hello: %v\n", reply)
+				} else {
+					fmt.Printf("err\n")
+				}
 			}
 		}
 	}()
@@ -306,33 +355,39 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 /*** RAFT RPCs **/
 func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.RequestVoteReply) error {
 	rh.interceptor.OnEventHandler(raft.RequestVoteEvent{args, rh.peer, rh.outgoing})
-	time.Sleep(NetworkForwardDelay)
-	success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
-	if success {
-		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
+	if rh.enabled {
 		time.Sleep(NetworkForwardDelay)
+		success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
+		if success {
+			rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
+			time.Sleep(NetworkForwardDelay)
+		}
 	}
 	return nil
 }
 
 func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.AppendEntriesReply) error {
 	rh.interceptor.OnEventHandler(raft.AppendEntriesEvent{args, rh.peer, rh.outgoing})
-	time.Sleep(NetworkForwardDelay)
-	success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
-	if success {
-		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
+	if rh.enabled {
 		time.Sleep(NetworkForwardDelay)
+		success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
+		if success {
+			rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
+			time.Sleep(NetworkForwardDelay)
+		}
 	}
 	return nil
 }
 
 func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error {
-	time.Sleep(NetworkForwardDelay)
 	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
-	success := rh.forwardClient.Call("Raft.Start", args, reply)
-	if success {
-		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
+	if rh.enabled {
 		time.Sleep(NetworkForwardDelay)
+		success := rh.forwardClient.Call("Raft.Start", args, reply)
+		if success {
+			rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
+			time.Sleep(NetworkForwardDelay)
+		}
 	}
 	return nil
 }

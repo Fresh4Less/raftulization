@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
+	"github.com/fresh4less/raftulization/switchIO"
+	"github.com/fresh4less/raftulization/rotaryEncoderIO"
 	"log"
 	"net"
 	"net/http"
@@ -15,6 +17,16 @@ import (
 	"strings"
 	"time"
 )
+
+type InteractiveChannels struct {
+	buttonBig 	chan int
+	buttonL 	chan int
+	buttonM		chan int
+	buttonR		chan int
+	rotaryL		chan int
+	rotaryM		chan int
+	rotaryR		chan int
+}
 
 type IpAddressList []string
 
@@ -136,13 +148,32 @@ func doIntercept() {
 	pixelsEnabled := interceptFlagSet.Bool("p", false, "Enable pixel displays")
 	pixelBrightness := interceptFlagSet.Float64("b", 1.0, "Pixel brightness (requires -p=true)")
 	isInteractive := interceptFlagSet.Bool("i", false, "Set for interactive mode (requires -p=true)")
-
+	s1Pin := interceptFlagSet.Int("s1", -1, "Set the pin for the outer line switch.")
+	s2Pin := interceptFlagSet.Int("s2", -1, "Set the pin for the inner line switch.")
+	buttonBigPin := interceptFlagSet.Int("buttonBig", -1, "Set the pin for the big button. (requires -i=true)")
+	buttonLPin := interceptFlagSet.Int("buttonL", -1, "Set the pin for the left rotary button. (requires -i=true)")
+	buttonMPin := interceptFlagSet.Int("buttonM", -1, "Set the pin for the middle rotary button. (requires -i=true)")
+	buttonRPin := interceptFlagSet.Int("buttonR", -1, "Set the pin for the right rotary button. (requires -i=true)")
+	rotaryL1Pin := interceptFlagSet.Int("rotaryL1", -1, "Set the pin for the left rotary data 1. (requires -i=true)")
+	rotaryL2Pin := interceptFlagSet.Int("rotaryL2", -1, "Set the pin for the left rotary data 2. (requires -i=true)")
+	rotaryM1Pin := interceptFlagSet.Int("rotaryM1", -1, "Set the pin for the middle rotary data 1. (requires -i=true)")
+	rotaryM2Pin := interceptFlagSet.Int("rotaryM2", -1, "Set the pin for the middle rotary data 2. (requires -i=true)")
+	rotaryR1Pin := interceptFlagSet.Int("rotaryR1", -1, "Set the pin for the right rotary data 1. (requires -i=true)")
+	rotaryR2Pin := interceptFlagSet.Int("rotaryR2", -1, "Set the pin for the right rotary data 2. (requires -i=true)")
+	
+	
 	forwardInfo := NetForwardInfoList{}
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
 	interceptFlagSet.Parse(os.Args[2:])
 
 	var neopixelDisplay PixelDisplay
+	
+	var s1Data chan int
+	var s2Data chan int
+	
 	if *pixelsEnabled {
+		s1Data = switchIO.NewSwitchIO(*s1Pin)
+		s2Data = switchIO.NewSwitchIO(*s2Pin)
 		if *isInteractive {
 			neopixelDisplay = NewNeopixelDisplay(18, 64+30+20+64, 255)
 		} else {
@@ -160,29 +191,24 @@ func doIntercept() {
 		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, brightness, false),
 	}
 	var interactiveDisplay *PixelDisplayView
+
+	var interactiveChans *InteractiveChannels	
+	
 	if *isInteractive {
-		//TODO: init interactive code
+		interactiveChans = &InteractiveChannels {
+			switchIO.NewSwitchIO(*buttonBigPin)
+			switchIO.NewSwitchIO(*buttonLPin)
+			switchIO.NewSwitchIO(*buttonMPin)
+			switchIO.NewSwitchIO(*buttonRPin)
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryL1Pin,*rotaryL2Pin)
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryM1Pin,*rotaryM2Pin)
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryR1Pin,*rotaryR2Pin)
+		}
 		interactiveDisplay = NewPixelDisplayView(neopixelDisplay, 64+30+20, 8,8, brightness, false)
 	}
-	//for i := 0; i < 64; i++ {
-	//	neopixelDisplay.Set(i, MakeColor(255,0,0))
-	//}
-	//for i := 64; i < 64+30; i++ {
-	//	neopixelDisplay.Set(i, MakeColor(0,255,0))
-	//}
-	//for i := 64+30; i < 64+30+20; i++ {
-	//	neopixelDisplay.Set(i, MakeColor(0,0,255))
-	//}
-	//neopixelDisplay.Show()
 
-	//matrixDisplay.SetArea(0,0,MakeColorFrame(8,8,MakeColor(255,0,0)))
-	//matrixDisplay.Draw()
-	//networkDisplays[0].SetArea(0,0,MakeColorFrame(30,1,MakeColor(0,255,0)))
-	//networkDisplays[0].Draw()
-	//networkDisplays[1].SetArea(0,0,MakeColorFrame(20,1,MakeColor(0,0,255)))
-	//networkDisplays[1].Draw()
-
-	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay)
+	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay, s1Data, s2Data, interactiveChans)
+	
 	select{}
 }
 
