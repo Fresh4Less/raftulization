@@ -1,4 +1,4 @@
-// +build rpiosupport
+// +build pixelsupport
 
 package rotaryEncoderIO
 
@@ -90,13 +90,13 @@ func watchChanges() {
 
 				if a == 1 && b == 1 {
 					if sw.seq == leftNum {
-						go func() {
-							sw.updCh <- 0
-						}()
+						go func(s *rotaryEncoder) {
+							s.updCh <- 0
+						}(sw)
 					} else if sw.seq == rightNum {
-						go func() {
-							sw.updCh <- 1
-						}()
+						go func(s *rotaryEncoder) {
+							s.updCh <- 1
+						}(sw)
 					}
 
 					sw.seq = 0

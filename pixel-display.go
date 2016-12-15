@@ -332,6 +332,7 @@ func NewMultiAnimationView(display *PixelDisplayView, combineMode ColorCombineMo
 
 func (mav *MultiAnimationView) SetBackgroundColor(color Color) {
 	mav.bgColor = color
+	mav.draw()
 }
 
 func (mav *MultiAnimationView) AddAnimation(animation []ColorFrame, fps float32) {

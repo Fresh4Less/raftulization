@@ -1,4 +1,4 @@
-// +build !rpiosupport
+// +build !pixelsupport
 
 package rotaryEncoderIO
 

@@ -160,10 +160,16 @@ func doIntercept() {
 	rotaryM2Pin := interceptFlagSet.Int("rotaryM2", -1, "Set the pin for the middle rotary data 2. (requires -i=true)")
 	rotaryR1Pin := interceptFlagSet.Int("rotaryR1", -1, "Set the pin for the right rotary data 1. (requires -i=true)")
 	rotaryR2Pin := interceptFlagSet.Int("rotaryR2", -1, "Set the pin for the right rotary data 2. (requires -i=true)")
+	raftId := interceptFlagSet.Int("id", 0, "Set the raft Id")
 	
 	
 	forwardInfo := NetForwardInfoList{}
 	interceptFlagSet.Var(&forwardInfo, "f", "comma separated list of forward info in form inPort~outPort~remoteAddress")
+
+	//used to send start
+	peerInterceptors := IpAddressList{}
+	interceptFlagSet.Var(&peerInterceptors, "o", "comma separated list of peer interceptor network addresses")
+
 	interceptFlagSet.Parse(os.Args[2:])
 
 	var neopixelDisplay PixelDisplay
@@ -211,7 +217,7 @@ func doIntercept() {
 		interactiveDisplay = NewPixelDisplayView(neopixelDisplay, 64+30+20, 8,8, brightness, false)
 	}
 
-	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay, s1Data, s2Data, interactiveChans)
+	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay, s1Data, s2Data, interactiveChans, peerInterceptors, *raftId)
 	
 	select{}
 }

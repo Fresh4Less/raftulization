@@ -43,7 +43,7 @@ func (ip *InteractivePanel) IncrementHue() {
 	ip.mu.Lock()
 	defer ip.mu.Unlock()
 	
-	ip.hue = (ip.hue + 1) % 256
+	ip.hue = (ip.hue + 5) % 256
 	ip.frame.Set(ip.x,ip.y,MakeColorHue(ip.hue), Error)
 }
 
@@ -51,7 +51,7 @@ func (ip *InteractivePanel) DecrementHue() {
 	ip.mu.Lock()
 	defer ip.mu.Unlock()
 	
-	ip.hue = ip.hue - 1
+	ip.hue = ip.hue - 5
 	if ip.hue < 0 {
 		ip.hue = 255
 	}

@@ -41,6 +41,14 @@ var RpcColors = map[string]Color {
 var ElectionTimeoutColor = MakeColor(0,255,0)
 var HeartbeatTimeoutColor = MakeColor(255,70,70)
 
+var RaftIdColors = map[int]Color {
+	0: MakeColorHue(25),
+	1: MakeColorHue(25+50),
+	2: MakeColorHue(25+50*2),
+	3: MakeColorHue(25+50*3),
+	4: MakeColorHue(25+50*4),
+}
+
 type NetForwardInfo struct {
 	SourceListenPort int
 
@@ -66,7 +74,6 @@ type Interceptor struct {
 	imageScreen ColorFrame
 	networkMultiAnimViews []*MultiAnimationView
 	matrixMultiFrameView *MultiFrameView
-	idColor Color
 	
 	networksEnabled []bool
 	
@@ -77,9 +84,13 @@ type Interceptor struct {
 	interactivePanel	*InteractivePanel
 
 	timeoutIndex int //used to check if the timeout was cancelled
+
+	demoModeEnabled bool
+	peerInterceptorRpcClients []*raft.UnreliableRpcClient
+	raftId int
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels, peerInterceptors IpAddressList, raftId int) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()
@@ -103,7 +114,7 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	interceptor.interactiveDisplay = interactiveDisplay
 
 	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
-	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(255,255,255))
+	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
 
 	for _, networkDisplay := range interceptor.networkDisplays {
 		interceptor.networkMultiAnimViews = append(interceptor.networkMultiAnimViews, NewMultiAnimationView(networkDisplay, Add, Error))
@@ -114,7 +125,7 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	//begin animation cycle
 	interceptor.matrixMultiFrameView.CycleFrames(
 		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
-		[]time.Duration{time.Second*2, time.Second*5},
+		[]time.Duration{time.Second*5, time.Second*5},
 		[]FrameTransition{Slide, Slide})
 
 	interceptor.networksEnabled = make([]bool,len(interceptor.networkDisplays))
@@ -125,11 +136,31 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 
 	if(interactiveChans != nil) {
 		interceptor.interactivePanel = NewInteractivePanel(8,8)
+		interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
+		interceptor.interactiveDisplay.Draw()
 	}
 
+	for _, ip := range peerInterceptors {
+		interceptor.peerInterceptorRpcClients = append(interceptor.peerInterceptorRpcClients, raft.NewUnreliableRpcClient(ip, 5, time.Second))
+	}
+
+	interceptor.raftId = raftId
+	
 	interceptor.HandleInteractive()
+	interceptor.RunDemoMode()
 		
 	return &interceptor
+}
+
+func (interceptor *Interceptor) RunDemoMode() {
+	go func() {
+		for true {
+			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
+			if interceptor.demoModeEnabled {
+				interceptor.SendStart(SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))})
+			}
+		}
+	}()
 }
 
 func (interceptor *Interceptor) HandleInteractive() {
@@ -211,11 +242,23 @@ func (interceptor *Interceptor) HandleInteractive() {
 			for true {
 				bigButtonPressed := (<-interceptor.interactiveChans.buttonBig == 0)
 				if bigButtonPressed {
-					fmt.Println("Button PRESSED!!!!")
+					interceptor.SendStart(SetPixelCommand{
+						interceptor.interactivePanel.x,
+						interceptor.interactivePanel.y,
+						MakeColorHue(interceptor.interactivePanel.hue),
+					})
 				}
 			}
 		}()
 		//TODO: do something with pressing in the 3 rotary encoders.
+		go func() {
+			for true {
+				toggleModeButonPressed := (<-interceptor.interactiveChans.buttonR == 0)
+				if toggleModeButonPressed {
+					interceptor.demoModeEnabled = !interceptor.demoModeEnabled
+				}
+			}
+		}()
 	}
 
 }
@@ -235,6 +278,27 @@ func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, ma
 			}
 		}
 	}()
+}
+
+func (interceptor *Interceptor) SendStart(command SetPixelCommand) {
+	go func() {
+		reply := raft.StartReply{}
+		interceptor.raftHandlers[1].GetForwardClient().Call("Raft.Start", raft.StartArgs{command}, &reply)
+	}()
+	for i, handler := range interceptor.raftHandlers {
+		if i%2 == 0 {
+			go func(h *RaftHandler) {
+				reply := raft.StartReply{}
+				h.GetForwardClient().Call("Raft.Start", raft.StartArgs{command}, &reply)
+			}(handler)
+		}
+	}
+	for _, peerInterceptor := range interceptor.peerInterceptorRpcClients {
+		go func(c *raft.UnreliableRpcClient) {
+			reply := raft.StartReply{}
+			c.Call("Raft.Start", raft.StartArgs{command}, &reply)
+		}(peerInterceptor)
+	}
 }
 
 /*** RAFT events RPC ***/
@@ -278,7 +342,7 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.RequestVoteEvent:
 		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
 		colors.Set(len(colors[0])-2, 0, RpcColors["RequestVote"], Error)
-		colors.Set(0,0, interceptor.idColor, Error)
+		colors.Set(0,0, RaftIdColors[interceptor.raftId], Error)
 
 		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
 		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
@@ -330,7 +394,7 @@ func calcFps(frameCount int) float32 {
 func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 	interceptor.raftStateScreen.SetAll(MakeColor(0,0,0))
 	//id TODO don't hardcode this
-	interceptor.raftStateScreen.SetRect(0, 0, MakeColorFrame(2, 2, MakeColor(255, 0, 0)), Error)
+	interceptor.raftStateScreen.SetRect(0, 0, MakeColorFrame(2, 2, RaftIdColors[interceptor.raftId]), Error)
 	// voted for TODO
 	//VotedFor int
 	// received votes TODO: use id colors instead of just counting
@@ -424,22 +488,12 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	fmt.Printf("RaftHandler: Listening on %v\n", listenPort)
 
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
-	go func() {
-		for true {
-			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
-			if rh.enabled {
-				reply := raft.StartReply{}
-				success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))}}, &reply)
-				if success {
-					fmt.Printf("Start hello: %v\n", reply)
-				} else {
-					fmt.Printf("err\n")
-				}
-			}
-		}
-	}()
 
 	return &rh
+}
+
+func (rh *RaftHandler) GetForwardClient() *raft.UnreliableRpcClient {
+	return rh.forwardClient
 }
 
 /*** RAFT RPCs **/
