@@ -42,6 +42,7 @@ type Interceptor struct {
 
 	raftStateScreen ColorFrame
 	imageScreen ColorFrame
+	networkScreens []ColorFrame
 	matrixMultiFrameView *MultiFrameView
 }
 
@@ -70,6 +71,10 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 
 	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
 	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(255,255,255))
+
+	for range interceptor.networkDisplays {
+		interceptor.networkScreens = append(interceptor.networkScreens, MakeColorFrame(8,8, MakeColor(0,0,0)))
+	}
 
 	interceptor.matrixMultiFrameView = NewMultiFrameView(matrixDisplay)
 	
@@ -105,23 +110,10 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 			colors[0][i] = event.Args.Entries[i].Command.(SetPixelCommand).PixelColor
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[0].Width)
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width)
 
 		fmt.Println(calcFps(len(animation)))
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
-
-		//if event.Outgoing {
-		//fmt.Printf("AppendEntries: ->%v\n", event.Peer)
-		//} else {
-		//fmt.Printf("AppendEntries: <-%v\n", event.Peer)
-		//}
-		//animate(event.Args,event.Peer, event.Outgoing)
-		//Term int
-		//LeaderId int
-		//PrevLogIndex int
-		//PrevLogTerm int
-		//Entries []Log
-		//LeaderCommit int
 	case raft.AppendEntriesResponseEvent:
 		//if event.Outgoing {
 		//fmt.Printf("AppendEntriesResponse: ->%v\n", event.Peer)
@@ -149,7 +141,6 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 func calcFps(frameCount int) float32 {
 	return float32(1000*frameCount)/float32(NetworkForwardDelay/time.Millisecond)
 }
-
 
 func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 	interceptor.raftStateScreen.SetAll(MakeColor(0,0,0))

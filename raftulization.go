@@ -193,15 +193,6 @@ func doLedTest() {
 	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
 	ledTestFlagSet.Parse(os.Args[2:])
 
-	white := MakeColor(255,255,255)
-	fmt.Printf("%v, %v, %v\n", white.GetRed(), white.GetGreen(), white.GetBlue())
-	red := MakeColor(255,0,0)
-	fmt.Printf("%v, %v, %v\n", red.GetRed(), red.GetGreen(), red.GetBlue())
-	green := MakeColor(0,255,0)
-	fmt.Printf("%v, %v, %v\n", green.GetRed(), green.GetGreen(), green.GetBlue())
-	blue := MakeColor(0,0,255)
-	fmt.Printf("%v, %v, %v\n", blue.GetRed(), blue.GetGreen(), blue.GetBlue())
-
 	colors := []Color{
 		MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
 		MakeColor(0, uint32(*pixelBrightness*float64(255)), 0),
@@ -220,6 +211,9 @@ func doLedTest() {
 		[]time.Duration{time.Second*5, time.Second*5},
 		[]FrameTransition{Slide, Slide})
 
+	stripDisplay := NewPixelDisplayView(neopixelDisplay, 0, 30, 1, float32(*pixelBrightness), false)
+	multiAnimView := NewMultiAnimationView(stripDisplay, Add, Error)
+
 	t := 0
 	for true {
 		screens[t%len(screens)].SetRect(0,0, MakeColorNumberChar(t%10, MakeColor(255,0,0), MakeColor(0,0,0)), Error)
@@ -227,9 +221,10 @@ func doLedTest() {
 		//for i := 0; i < 64; i++ {
 			//neopixelDisplay.Set(i, colors[t%3])
 		//}
-		for i := 64; i < 64+30; i++ {
-			neopixelDisplay.Set(i, colors[(t+1)%3])
-		}
+		multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width), 30/((t%4)+1))
+		//for i := 64; i < 64+30; i++ {
+			//neopixelDisplay.Set(i, colors[(t+1)%3])
+		//}
 		for i := 64+30; i < 64+30+20; i++ {
 			neopixelDisplay.Set(i, colors[(t+2)%3])
 		}

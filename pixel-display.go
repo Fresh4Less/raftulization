@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/fresh4less/raftulization/ws2811"
+	"errors"
 	"time"
 )
 
@@ -40,7 +41,7 @@ func (pd *PixelDisplayView) Draw() {
 	for i := 0; i < pd.Height; i++ {
 		for j := 0; j < pd.Width; j++ {
 			pd.Display.Set(pd.Offset+pd.Height*i+j, pd.Colors[i][j])
-			//if pd.Width == 8 {
+			//if pd.Width == 30 {
 				//if pd.Colors[i][j] == 0 {
 					//fmt.Printf("*")
 				//} else if pd.Colors[i][j] == MakeColor(255,255,255) {
@@ -50,11 +51,11 @@ func (pd *PixelDisplayView) Draw() {
 				//}
 			//}
 		}
-		//if pd.Width == 8 {
+		//if pd.Width == 30 {
 			//fmt.Printf("\n")
 		//}
 	}
-	//if pd.Width == 8 {
+	//if pd.Width == 30 {
 		//fmt.Printf("\n")
 	//}
 	pd.Display.Show()
@@ -92,6 +93,21 @@ func MakeColor(red, green, blue uint32) Color {
 	return Color((green << 16) | (red << 8) | blue)
 }
 
+func (c Color) Add(c2 Color) Color {
+	return MakeColor(
+		MinUint32(255, c.GetRed() + c2.GetRed()),
+		MinUint32(255, c.GetGreen() + c2.GetGreen()),
+		MinUint32(255, c.GetBlue() + c2.GetBlue()))
+}
+
+func MinUint32(a, b uint32) uint32 {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
 /********** ColorFrame **********/
 
 type ColorOverflowMode int
@@ -118,7 +134,8 @@ func MakeColorFrame(width, height int, color Color) ColorFrame {
 	return colors
 }
 
-func (c ColorFrame) Set(x, y int, color Color, overflowMode ColorOverflowMode) {
+//returns x, y, errorCode, error
+func (c ColorFrame) calcOverflowPosition(x, y int, overflowMode ColorOverflowMode) (int, int, int, error) {
 	if y < 0 || x < 0 || y >= len(c) || x >= len(c[y]) {
 		switch overflowMode {
 			case Error:
@@ -126,15 +143,37 @@ func (c ColorFrame) Set(x, y int, color Color, overflowMode ColorOverflowMode) {
 				if y >= 0 && y < len(c) {
 					width = fmt.Sprintf("%v", len(c))
 				}
-				panic(fmt.Sprintf("ColorFrame.Set: tried to set (%v,%v) but the frame has dimensions (%v,%v)",
+				return 0, 0, 1, errors.New(fmt.Sprintf("ColorFrame.Set: tried to set (%v,%v) but the frame has dimensions (%v,%v)",
 					x, y, width, len(c)))
 			case Clip:
-				return
+				return 0, 0, 2, nil
 			case Wrap:
-				y = y % len(c)
-				x = x % len(c[y])
+				return x % len(c[y]), y % len(c), 0, nil
 		}
 	}
+	return x, y, 0, nil
+}
+
+//returns 0,0,0 if set to clip mode
+func (c ColorFrame) Get(x, y int, overflowMode ColorOverflowMode) Color {
+	x, y, errorCode, err := c.calcOverflowPosition(x, y, overflowMode)
+	if errorCode == 1 {
+		panic(err)
+	} else if errorCode == 2 {
+		return MakeColor(0,0,0)
+	}
+
+	return c[y][x]
+}
+func (c ColorFrame) Set(x, y int, color Color, overflowMode ColorOverflowMode) {
+	x, y, errorCode, err := c.calcOverflowPosition(x, y, overflowMode)
+	if errorCode == 1 {
+		panic(err)
+	} else if errorCode == 2 {
+		// do nothing
+		return
+	}
+
 	c[y][x] = color
 }
 
@@ -150,6 +189,41 @@ func (c ColorFrame) SetRect(x, y int, source ColorFrame, overflowMode ColorOverf
 	for i := 0; i < len(source); i++ {
 		for j := 0; j < len(source[i]); j++ {
 			c.Set(x+j, y+i, source[i][j], overflowMode)
+		}
+	}
+}
+
+type ColorCombineMode int
+
+const(
+	OverwriteAll ColorCombineMode = iota
+	Overwrite // 0s don't overwrite colors
+	Add
+	SetWhite
+
+)
+
+func (c ColorFrame) CombineRect(x, y int, source ColorFrame, combineMode ColorCombineMode, overflowMode ColorOverflowMode) {
+	for i := 0; i < len(source); i++ {
+		for j := 0; j < len(source[i]); j++ {
+			switch combineMode {
+			case OverwriteAll:
+				c.Set(x+j, y+i, source[i][j], overflowMode)
+			case Overwrite:
+				if source[i][j] != MakeColor(0,0,0) {
+					c.Set(x+j, y+i, source[i][j], overflowMode)
+				}
+			case Add:
+				c.Set(x+j, y+i, c.Get(x+j, y+i, overflowMode).Add(source[i][j]), overflowMode)
+			case SetWhite:
+				if source[i][j] != MakeColor(0,0,0) {
+					if c.Get(x+j, y+i, overflowMode) != MakeColor(0,0,0) {
+						c.Set(x+j, y+i, MakeColor(255,255,255), overflowMode)
+					} else {
+						c.Set(x+j, y+i, source[i][j], overflowMode)
+					}
+				}
+			}
 		}
 	}
 }
@@ -236,6 +310,53 @@ func (nd *NeopixelDisplay) render() {
 	nd.timerRunning = true
 	nd.renderAfterTimer = false
 }
+
+/********** MultiAnimationView **********/
+// draws multiple animations on top of each other
+type AnimationData struct {
+	animation []ColorFrame
+	frameIndex int
+}
+
+type MultiAnimationView struct {
+	display *PixelDisplayView
+	combineMode ColorCombineMode
+	overflowMode ColorOverflowMode
+	animations []*AnimationData
+}
+
+func NewMultiAnimationView(display *PixelDisplayView, combineMode ColorCombineMode, overflowMode ColorOverflowMode) *MultiAnimationView {
+	return &MultiAnimationView{display, combineMode, overflowMode, make([]*AnimationData, 0)}
+}
+
+func (mav *MultiAnimationView) AddAnimation(animation []ColorFrame, fps int) {
+	animationData := AnimationData{animation, 0}
+	mav.animations = append(mav.animations, &animationData)
+	mav.draw()
+	go func() {
+		for i := 1; i < len(animation); i++ {
+			time.Sleep(time.Duration(1000.0/fps)*time.Millisecond)
+			animationData.frameIndex = i
+			mav.draw()
+		}
+		//remove animation from draw list
+		for i, anim := range mav.animations {
+			if anim == &animationData {
+				mav.animations = append(mav.animations[:i], mav.animations[i+1:]...)
+			}
+		}
+	}()
+}
+
+func (mav *MultiAnimationView) draw() {
+	fullFrame := MakeColorFrame(mav.display.Width, mav.display.Height, MakeColor(0,0,0))
+	for _, animationData := range mav.animations {
+		fullFrame.CombineRect(0, 0, animationData.animation[animationData.frameIndex], mav.combineMode, mav.overflowMode)
+	}
+	mav.display.SetFrame(fullFrame)
+	mav.display.Draw()
+}
+
 
 /********** MultiFrameView ***********/
 
