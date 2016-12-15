@@ -18,7 +18,9 @@ import (
 // for each remote peer we listen on a separate "source" and "remote" port
 // This means that for each remote peer we create two RaftHandlers
 
-const NetworkForwardDelay = time.Millisecond * 1500
+const MinElectionTimeout = time.Second * 4
+const HeartbeatTimeout = time.Second * 3
+const NetworkForwardDelay = time.Millisecond * 1100
 
 //colors
 var StateColors = map[raft.ServerState]Color{
@@ -35,6 +37,9 @@ var RpcColors = map[string]Color {
 	"StartEvent": MakeColor(0,255,0),
 	"StartEventResponse": MakeColor(165,255,0),
 }
+
+var ElectionTimeoutColor = MakeColor(0,255,0)
+var HeartbeatTimeoutColor = MakeColor(255,70,70)
 
 type NetForwardInfo struct {
 	SourceListenPort int
@@ -70,6 +75,8 @@ type Interceptor struct {
 	interactiveChans	*InteractiveChannels
 
 	interactivePanel	*InteractivePanel
+
+	timeoutIndex int //used to check if the timeout was cancelled
 }
 
 func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels) *Interceptor {
@@ -119,7 +126,7 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	if(interactiveChans != nil) {
 		interceptor.interactivePanel = NewInteractivePanel(8,8)
 	}
-	
+
 	interceptor.HandleInteractive()
 		
 	return &interceptor
@@ -213,6 +220,23 @@ func (interceptor *Interceptor) HandleInteractive() {
 
 }
 
+func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, maxDuration time.Duration, color Color) {
+	timeoutIndex := interceptor.timeoutIndex
+	timeoutIndex++
+	go func() {
+		beginIndex := int(float32(duration)/float32(maxDuration) * float32(8+1))
+		for i := beginIndex; i >= 0; i-- {
+			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(8,1, MakeColor(0,0,0)), Error)
+			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(i, 1, color), Error)
+			interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
+			time.Sleep(maxDuration/time.Duration(beginIndex))
+			if timeoutIndex != interceptor.timeoutIndex {
+				return
+			}
+		}
+	}()
+}
+
 /*** RAFT events RPC ***/
 func (interceptor *Interceptor) OnEvent(event raft.RaftEvent, reply *bool) error {
 	*reply = interceptor.OnEventHandler(event)
@@ -226,9 +250,9 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.EntryCommittedEvent:
 		interceptor.onEntryCommitted(event)
 	case raft.SetElectionTimeoutEvent:
-		//fmt.Printf("SetElectionTimeout: %v\n", event.Duration)
+		interceptor.BeginTimeoutAnimation(event.Duration, MinElectionTimeout*2, ElectionTimeoutColor)
 	case raft.SetHeartbeatTimeoutEvent:
-		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
+		interceptor.BeginTimeoutAnimation(event.Duration, event.Duration, HeartbeatTimeoutColor)
 	case raft.AppendEntriesEvent:
 		colors := MakeColorFrame(3 + len(event.Args.Entries), 1, MakeColor(255,255,255))
 		colors.Set(len(colors[0])-2, 0, RpcColors["AppendEntries"], Error)
@@ -320,10 +344,12 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 	// logs
 	for i, log := range event.RecentLogs {
 		if setPixelCommand, ok := log.Command.(SetPixelCommand); ok {
-			//TODO: use last applied to display committed logs differently than uncommitted
-			//LastApplied int
-			//LogLength int
-			interceptor.raftStateScreen.SetRect(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 2, setPixelCommand.PixelColor), Error)
+			color := setPixelCommand.PixelColor
+			if event.LogLength - len(event.RecentLogs) + i >= event.LastApplied {
+				//uncommitted, show at half brightness
+				color = MakeColor(color.GetRed()/2, color.GetGreen()/2, color.GetBlue()/2)
+			}
+			interceptor.raftStateScreen.SetRect(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 1, color), Error)
 		}
 	}
 	// term
