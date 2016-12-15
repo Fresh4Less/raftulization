@@ -132,6 +132,12 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.networksEnabled[0] = enabled
 				interceptor.raftHandlers[0].enabled = enabled
 				interceptor.raftHandlers[1].enabled = enabled
+				
+				if enabled {
+					interceptor.networkMultiAnimViews[0].SetBackgroundColor(MakeColor(0,0,0))
+				} else {
+					interceptor.networkMultiAnimViews[0].SetBackgroundColor(MakeColor(10,0,0))
+				}
 			}
 		}()
 	}
@@ -144,6 +150,11 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.networksEnabled[1] = enabled
 				interceptor.raftHandlers[2].enabled = enabled
 				interceptor.raftHandlers[3].enabled = enabled
+				if enabled {
+					interceptor.networkMultiAnimViews[1].SetBackgroundColor(MakeColor(0,0,0))
+				} else {
+					interceptor.networkMultiAnimViews[1].SetBackgroundColor(MakeColor(10,0,0))
+				}
 			}
 		}()
 	}

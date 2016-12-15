@@ -323,10 +323,15 @@ type MultiAnimationView struct {
 	combineMode ColorCombineMode
 	overflowMode ColorOverflowMode
 	animations []*AnimationData
+	bgColor Color
 }
 
 func NewMultiAnimationView(display *PixelDisplayView, combineMode ColorCombineMode, overflowMode ColorOverflowMode) *MultiAnimationView {
-	return &MultiAnimationView{display, combineMode, overflowMode, make([]*AnimationData, 0)}
+	return &MultiAnimationView{display, combineMode, overflowMode, make([]*AnimationData, 0), MakeColor(0,0,0)}
+}
+
+func (mav *MultiAnimationView) SetBackgroundColor(color Color) {
+	mav.bgColor = color
 }
 
 func (mav *MultiAnimationView) AddAnimation(animation []ColorFrame, fps float32) {
@@ -353,7 +358,9 @@ func (mav *MultiAnimationView) draw() {
 	for _, animationData := range mav.animations {
 		fullFrame.CombineRect(0, 0, animationData.animation[animationData.frameIndex], mav.combineMode, mav.overflowMode)
 	}
-	mav.display.SetFrame(fullFrame)
+	finalFrame := MakeColorFrame(mav.display.Width, mav.display.Height, mav.bgColor)
+	finalFrame.CombineRect(0,0, fullFrame, Overwrite, Error)
+	mav.display.SetFrame(finalFrame)
 	mav.display.Draw()
 }
 
