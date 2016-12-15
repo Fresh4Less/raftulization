@@ -221,7 +221,8 @@ func doLedTest() {
 		//for i := 0; i < 64; i++ {
 			//neopixelDisplay.Set(i, colors[t%3])
 		//}
-		multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width), 30/((t%4)+1))
+		multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width, t%2==0), 30/((t%4)+1))
+		//multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width, t%2==0), 60)
 		//for i := 64; i < 64+30; i++ {
 			//neopixelDisplay.Set(i, colors[(t+1)%3])
 		//}

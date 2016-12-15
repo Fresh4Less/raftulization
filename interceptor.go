@@ -19,6 +19,20 @@ import (
 
 const NetworkForwardDelay = time.Millisecond * 700
 
+//colors
+var StateColors = map[raft.ServerState]Color{
+	raft.Follower:  MakeColor(0, 0, 255),
+	raft.Candidate: MakeColor(0, 255, 0),
+	raft.Leader:    MakeColor(255, 0, 0),
+}
+
+var RpcColors = map[string]Color {
+	"AppendEntries": MakeColor(255,0,0),
+	"AppendEntriesResponse": MakeColor(255,165,0),
+	"RequestVote": MakeColor(0,0,255),
+	"RequestVoteResponse": MakeColor(0,165,255),
+}
+
 type NetForwardInfo struct {
 	SourceListenPort int
 
@@ -42,8 +56,9 @@ type Interceptor struct {
 
 	raftStateScreen ColorFrame
 	imageScreen ColorFrame
-	networkScreens []ColorFrame
+	networkMultiAnimViews []*MultiAnimationView
 	matrixMultiFrameView *MultiFrameView
+	idColor Color
 }
 
 func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView) *Interceptor {
@@ -72,8 +87,8 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
 	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(255,255,255))
 
-	for range interceptor.networkDisplays {
-		interceptor.networkScreens = append(interceptor.networkScreens, MakeColorFrame(8,8, MakeColor(0,0,0)))
+	for _, networkDisplay := range interceptor.networkDisplays {
+		interceptor.networkMultiAnimViews = append(interceptor.networkMultiAnimViews, NewMultiAnimationView(networkDisplay, Add, Error))
 	}
 
 	interceptor.matrixMultiFrameView = NewMultiFrameView(matrixDisplay)
@@ -104,34 +119,39 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.SetHeartbeatTimeoutEvent:
 		//fmt.Printf("SetHeartbeatTimeout: %v\n", event.Duration)
 	case raft.AppendEntriesEvent:
-		colors := MakeColorFrame(1,1 + len(event.Args.Entries), MakeColor(0,0,0))
-		colors[0][len(colors[0])-1] = MakeColor(255,0,0)
+		colors := MakeColorFrame(1 + len(event.Args.Entries), 1, RpcColors["AppendEntries"])
 		for i := 0; i < len(colors[0])-1; i++ {
-			colors[0][i] = event.Args.Entries[i].Command.(SetPixelCommand).PixelColor
+			colors.Set(i,0, event.Args.Entries[i].Command.(SetPixelCommand).PixelColor, Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width)
-
-		fmt.Println(calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
 		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 	case raft.AppendEntriesResponseEvent:
-		//if event.Outgoing {
-		//fmt.Printf("AppendEntriesResponse: ->%v\n", event.Peer)
-		//} else {
-		//fmt.Printf("AppendEntriesResponse: <-%v\n", event.Peer)
-		//}
+		colors := MakeColorFrame(2, 1, RpcColors["AppendEntriesResponse"])
+		if event.Reply.Success {
+			colors.Set(0,0, MakeColor(0,255,0), Error)
+		} else {
+			colors.Set(0,0, MakeColor(255,0,0), Error)
+		}
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 	case raft.RequestVoteEvent:
-		//if event.Outgoing {
-		//fmt.Printf("RequestVote: ->%v\n", event.Peer)
-		//} else {
-		//fmt.Printf("RequestVote: <-%v\n", event.Peer)
-		//}
+		colors := MakeColorFrame(2, 1, RpcColors["RequestVote"])
+		colors.Set(0,0, interceptor.idColor, Error)
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 	case raft.RequestVoteResponseEvent:
-		//if event.Outgoing {
-		//fmt.Printf("RequestVoteResponse: ->%v\n", event.Peer)
-		//} else {
-		//fmt.Printf("RequestVoteResponse: <-%v\n", event.Peer)
-		//}
+		colors := MakeColorFrame(2, 1, RpcColors["RequestVote"])
+		if event.Reply.VoteGranted {
+			colors.Set(0,0, MakeColor(0,255,0), Error)
+		} else {
+			colors.Set(0,0, MakeColor(255,0,0), Error)
+		}
+
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		go interceptor.networkDisplays[event.Peer].DrawAnimation(animation, calcFps(len(animation)))
 	default:
 		fmt.Printf("Unexpected type %T\n", event)
 	}
@@ -182,12 +202,15 @@ func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent)
 }
 
 // moves horizontally only
-func MakeMovingSegmentAnimation(colors ColorFrame, length int) []ColorFrame {
-	frameCount := len(colors[0])+ length-1
+func MakeMovingSegmentAnimation(colors ColorFrame, length int, reverseDirection bool) []ColorFrame {
+	frameCount := len(colors[0])+ length
 	frames := make([]ColorFrame, frameCount)
 	for frame := 0; frame < frameCount; frame++ {
 		frames[frame] = MakeColorFrame(length, 1, MakeColor(0,0,0))
 		beginIndex := frame - (len(colors[0])-1)
+		if reverseDirection {
+			beginIndex = length-1 - frame
+		}
 		for i, color := range colors[0] {
 			frames[frame].Set(beginIndex+i,0, color, Clip)
 		}
@@ -276,12 +299,6 @@ func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error 
 		time.Sleep(NetworkForwardDelay)
 	}
 	return nil
-}
-
-var StateColors = map[raft.ServerState]Color{
-	raft.Follower:  MakeColor(0, 0, 255),
-	raft.Candidate: MakeColor(0, 255, 0),
-	raft.Leader:    MakeColor(255, 0, 0),
 }
 
 func init() {
