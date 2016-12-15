@@ -1,3 +1,5 @@
+// +build rpiosupport
+
 package switchIO
 
 import (

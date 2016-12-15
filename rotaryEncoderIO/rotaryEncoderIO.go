@@ -1,3 +1,4 @@
+// +build rpiosupport
 package rotaryEncoderIO
 
 import (

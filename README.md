@@ -8,6 +8,7 @@
 `go install`
 
 To enable pixel support, use `go install -tags pixelsupport`. Requires ws2811 headers and library to be in system include/lib paths.
+To enable interactive support, use `go install -tags rpiosupport`. Go get "github.com/fresh4less/raftulization/switchIO" and "github.com/fresh4less/raftulization/rotaryEncoderIO" 
 
 ## Run
 Run RAFT:
