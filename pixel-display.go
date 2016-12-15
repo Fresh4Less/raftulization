@@ -329,7 +329,7 @@ func NewMultiAnimationView(display *PixelDisplayView, combineMode ColorCombineMo
 	return &MultiAnimationView{display, combineMode, overflowMode, make([]*AnimationData, 0)}
 }
 
-func (mav *MultiAnimationView) AddAnimation(animation []ColorFrame, fps int) {
+func (mav *MultiAnimationView) AddAnimation(animation []ColorFrame, fps float32) {
 	animationData := AnimationData{animation, 0}
 	mav.animations = append(mav.animations, &animationData)
 	mav.draw()
