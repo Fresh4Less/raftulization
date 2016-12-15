@@ -4,7 +4,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
-	"github.com/fresh4less/raftulization/switchIO"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -113,12 +112,13 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 	interceptor.s1Data = s1Data
 	interceptor.s2Data = s2Data
 	interceptor.interactiveChans = interactiveChans
+
+	interceptor.HandleInteractive()
 		
 	return &interceptor
 }
 
 func (interceptor *Interceptor) HandleInteractive() {
-{
 	if interceptor.s1Data != nil {
 		go func() {
 			for true {
@@ -126,19 +126,18 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.networksEnabled[0] = enabled
 				interceptor.raftHandlers[0].enabled = enabled
 				interceptor.raftHandlers[1].enabled = enabled
-				fmt.Printf("Network 0 %v\n", enabled)
 			}
 		}()
 	}
 	
+	//if interceptor.s2Data != nil  && len(interceptor.networksEnabled) > 1 {
 	if interceptor.s2Data != nil {
 		go func() {
 			for true {
-				enabled := (<- interceptor.s2Data) == 0		
+				enabled := (<-interceptor.s2Data == 0)
 				interceptor.networksEnabled[1] = enabled
 				interceptor.raftHandlers[2].enabled = enabled
 				interceptor.raftHandlers[3].enabled = enabled
-				fmt.Printf("Network 1 %v\n", enabled)
 			}
 		}()
 	}
@@ -336,8 +335,8 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	rh.forwardClient = raft.NewUnreliableRpcClient(forwardAddress, 5, time.Second)
 	go func() {
 		for true {
+			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
 			if rh.enabled {
-				time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
 				reply := raft.StartReply{}
 				success := rh.forwardClient.Call("Raft.Start", raft.StartArgs{SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))}}, &reply)
 				if success {

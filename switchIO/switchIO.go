@@ -3,7 +3,7 @@ package switchIO
 import (
 	"fmt"
 	"time"
-
+	"sync"
 	"github.com/stianeikeland/go-rpio"
 )
 
@@ -11,6 +11,7 @@ var (
 	initialized     = false
 	refreshRate     = 100 //Milliseconds
 	watchedSwitches = []*switchPin{}
+	mutex = &sync.Mutex{}
 )
 
 func initialize() bool {
@@ -28,6 +29,8 @@ func initialize() bool {
 
 //NewSwitchIO factory for a switch object
 func NewSwitchIO(pin int) chan int {
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	if !initialized {
 		success := initialize()
@@ -67,9 +70,9 @@ func watchChanges() {
 			read := int(sw.pin.Read())
 			if read != sw.prevVal {
 				sw.prevVal = read
-				go func() {
-					sw.updateCh <- read
-				}()
+				go func(s *switchPin) {
+					s.updateCh <- read
+				}(sw)
 			}
 		}
 

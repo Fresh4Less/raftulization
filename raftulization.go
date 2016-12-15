@@ -74,9 +74,9 @@ func doRaft() {
 	raftFlagSet.Var(&peerAddresses, "c", "comma separated list of peer network addresses")
 
 	var raftStatePath = raftFlagSet.String("f", path.Join(os.TempDir(), "raftState.state"), "raft save state file path")
-	fmt.Printf("Saving state at %v\n", *raftStatePath)
 
 	raftFlagSet.Parse(os.Args[2:])
+	fmt.Printf("Saving state at %v\n", *raftStatePath)
 	// server
 	// add myself to peers
 	peerAddresses = append(peerAddresses, ":"+strconv.Itoa(*serverPort))
@@ -183,6 +183,10 @@ func doIntercept() {
 		neopixelDisplay = &FakeDisplay{64 + 30 + 20}
 	}
 
+	if len(forwardInfo) < 2 {
+		s2Data = nil
+	}
+
 	brightness := float32(*pixelBrightness)
 
 	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, brightness, false)
@@ -196,13 +200,13 @@ func doIntercept() {
 	
 	if *isInteractive {
 		interactiveChans = &InteractiveChannels {
-			switchIO.NewSwitchIO(*buttonBigPin)
-			switchIO.NewSwitchIO(*buttonLPin)
-			switchIO.NewSwitchIO(*buttonMPin)
-			switchIO.NewSwitchIO(*buttonRPin)
-			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryL1Pin,*rotaryL2Pin)
-			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryM1Pin,*rotaryM2Pin)
-			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryR1Pin,*rotaryR2Pin)
+			switchIO.NewSwitchIO(*buttonBigPin),
+			switchIO.NewSwitchIO(*buttonLPin),
+			switchIO.NewSwitchIO(*buttonMPin),
+			switchIO.NewSwitchIO(*buttonRPin),
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryL1Pin,*rotaryL2Pin),
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryM1Pin,*rotaryM2Pin),
+			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryR1Pin,*rotaryR2Pin),
 		}
 		interactiveDisplay = NewPixelDisplayView(neopixelDisplay, 64+30+20, 8,8, brightness, false)
 	}
