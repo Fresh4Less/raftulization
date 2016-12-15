@@ -84,6 +84,8 @@ type Interceptor struct {
 	interactivePanel	*InteractivePanel
 
 	timeoutIndex int //used to check if the timeout was cancelled
+	timeoutDisplayIndex int
+	timeoutColor Color
 
 	demoModeEnabled bool
 	peerInterceptorRpcClients []*raft.UnreliableRpcClient
@@ -264,15 +266,17 @@ func (interceptor *Interceptor) HandleInteractive() {
 }
 
 func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, maxDuration time.Duration, color Color) {
+	interceptor.timeoutIndex++
 	timeoutIndex := interceptor.timeoutIndex
-	timeoutIndex++
+	interceptor.timeoutColor = color
 	go func() {
-		beginIndex := int(float32(duration)/float32(maxDuration) * float32(8+1))
+		beginIndex := int(float32(duration)/float32(maxDuration) * float32(8))
 		for i := beginIndex; i >= 0; i-- {
+			interceptor.timeoutDisplayIndex = i
 			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(8,1, MakeColor(0,0,0)), Error)
-			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(i, 1, color), Error)
+			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), Error)
 			interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
-			time.Sleep(maxDuration/time.Duration(beginIndex))
+			time.Sleep(maxDuration/9)
 			if timeoutIndex != interceptor.timeoutIndex {
 				return
 			}
@@ -416,6 +420,10 @@ func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
 			interceptor.raftStateScreen.SetRect(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 1, color), Error)
 		}
 	}
+	
+	interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(8,1, MakeColor(0,0,0)), Error)
+	interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), Error)
+
 	// term
 	interceptor.raftStateScreen.SetRect(0, 5, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
 	interceptor.raftStateScreen.SetRect(3, 5, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
