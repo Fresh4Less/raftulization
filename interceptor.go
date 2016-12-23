@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"github.com/fresh4less/neopixel-display/neopixeldisplay"
 	"github.com/fresh4less/raftulization/raft"
 	"net"
 	"net/http"
@@ -23,30 +24,30 @@ const HeartbeatTimeout = time.Second * 3
 const NetworkForwardDelay = time.Millisecond * 1100
 
 //colors
-var StateColors = map[raft.ServerState]Color{
-	raft.Follower:  MakeColor(0, 0, 255),
-	raft.Candidate: MakeColor(0, 255, 0),
-	raft.Leader:    MakeColor(255, 0, 0),
+var StateColors = map[raft.ServerState]neopixeldisplay.Color{
+	raft.Follower:  neopixeldisplay.MakeColor(0, 0, 255),
+	raft.Candidate: neopixeldisplay.MakeColor(0, 255, 0),
+	raft.Leader:    neopixeldisplay.MakeColor(255, 0, 0),
 }
 
-var RpcColors = map[string]Color {
-	"AppendEntries": MakeColor(255,0,0),
-	"AppendEntriesResponse": MakeColor(255,165,0),
-	"RequestVote": MakeColor(0,0,255),
-	"RequestVoteResponse": MakeColor(0,165,255),
-	"StartEvent": MakeColor(0,255,0),
-	"StartEventResponse": MakeColor(165,255,0),
+var RpcColors = map[string]neopixeldisplay.Color {
+	"AppendEntries": neopixeldisplay.MakeColor(255,0,0),
+	"AppendEntriesResponse": neopixeldisplay.MakeColor(255,165,0),
+	"RequestVote": neopixeldisplay.MakeColor(0,0,255),
+	"RequestVoteResponse": neopixeldisplay.MakeColor(0,165,255),
+	"StartEvent": neopixeldisplay.MakeColor(0,255,0),
+	"StartEventResponse": neopixeldisplay.MakeColor(165,255,0),
 }
 
-var ElectionTimeoutColor = MakeColor(0,255,0)
-var HeartbeatTimeoutColor = MakeColor(255,70,70)
+var ElectionTimeoutColor = neopixeldisplay.MakeColor(0,255,0)
+var HeartbeatTimeoutColor = neopixeldisplay.MakeColor(255,70,70)
 
-var RaftIdColors = map[int]Color {
-	0: MakeColorHue(25),
-	1: MakeColorHue(25+50),
-	2: MakeColorHue(25+50*2),
-	3: MakeColorHue(25+50*3),
-	4: MakeColorHue(25+50*4),
+var RaftIdColors = map[int]neopixeldisplay.Color {
+	0: neopixeldisplay.MakeColorHue(25),
+	1: neopixeldisplay.MakeColorHue(25+50),
+	2: neopixeldisplay.MakeColorHue(25+50*2),
+	3: neopixeldisplay.MakeColorHue(25+50*3),
+	4: neopixeldisplay.MakeColorHue(25+50*4),
 }
 
 type NetForwardInfo struct {
@@ -58,7 +59,7 @@ type NetForwardInfo struct {
 
 type SetPixelCommand struct {
 	X, Y int
-	PixelColor Color
+	PixelColor neopixeldisplay.Color
 }
 
 type Interceptor struct {
@@ -66,14 +67,15 @@ type Interceptor struct {
 	rpcServer       *rpc.Server
 	raftHandlers    []*RaftHandler
 
-	matrixDisplay   *PixelDisplayView
-	networkDisplays []*PixelDisplayView
-	interactiveDisplay *PixelDisplayView
+	matrixScreen   *neopixeldisplay.ScreenView
+	networkScreens []*neopixeldisplay.ScreenView
+	interactiveScreen *neopixeldisplay.ScreenView
 
-	raftStateScreen ColorFrame
-	imageScreen ColorFrame
-	networkMultiAnimViews []*MultiAnimationView
-	matrixMultiFrameView *MultiFrameView
+	raftStateFrame *neopixeldisplay.ColorFrame
+	imageFrame *neopixeldisplay.ColorFrame
+	networkLayerViews []*neopixeldisplay.LayerView
+	networkAnimLayerViews []*neopixeldisplay.LayerView
+	matrixTransitionView *neopixeldisplay.TransitionView
 	
 	networksEnabled []bool
 	
@@ -85,14 +87,14 @@ type Interceptor struct {
 
 	timeoutIndex int //used to check if the timeout was cancelled
 	timeoutDisplayIndex int
-	timeoutColor Color
+	timeoutColor neopixeldisplay.Color
 
 	demoModeEnabled bool
 	peerInterceptorRpcClients []*raft.UnreliableRpcClient
 	raftId int
 }
 
-func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixDisplay *PixelDisplayView, networkDisplays []*PixelDisplayView, interactiveDisplay *PixelDisplayView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels, peerInterceptors IpAddressList, raftId int) *Interceptor {
+func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []NetForwardInfo, matrixScreen *neopixeldisplay.ScreenView, networkScreens []*neopixeldisplay.ScreenView, interactiveScreen *neopixeldisplay.ScreenView, s1Data, s2Data chan int, interactiveChans *InteractiveChannels, peerInterceptors IpAddressList, raftId int) *Interceptor {
 	interceptor := Interceptor{}
 
 	interceptor.rpcServer = rpc.NewServer()
@@ -111,35 +113,39 @@ func NewInterceptor(eventListenPort int, sourceAddress string, forwardInfo []Net
 			NewRaftHandler(&interceptor, info.RemoteListenPort, sourceAddress, i, true))
 	}
 
-	interceptor.matrixDisplay = matrixDisplay
-	interceptor.networkDisplays = networkDisplays
-	interceptor.interactiveDisplay = interactiveDisplay
+	interceptor.matrixScreen = matrixScreen
+	interceptor.networkScreens = networkScreens
+	interceptor.interactiveScreen = interactiveScreen
 
-	interceptor.raftStateScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
-	interceptor.imageScreen = MakeColorFrame(8,8,MakeColor(0,0,0))
-
-	for _, networkDisplay := range interceptor.networkDisplays {
-		interceptor.networkMultiAnimViews = append(interceptor.networkMultiAnimViews, NewMultiAnimationView(networkDisplay, Add, Error))
+	for _, networkScreen := range interceptor.networkScreens {
+		//each network strip has a 2-layer view. the bottom layer is the red bg, top layer is the animation layer
+		layerView := neopixeldisplay.NewLayerView(networkScreen.GetFrame())
+		layerView.AddLayer(neopixeldisplay.Overwrite)
+		animLayer := layerView.AddLayer(neopixeldisplay.Overwrite)
+		animLayerView := neopixeldisplay.NewLayerView(animLayer.Frame)
+		interceptor.networkLayerViews = append(interceptor.networkLayerViews, layerView)
+		interceptor.networkAnimLayerViews = append(interceptor.networkLayerViews, animLayerView)
 	}
 
-	interceptor.matrixMultiFrameView = NewMultiFrameView(matrixDisplay)
+	interceptor.matrixTransitionView = neopixeldisplay.NewTransitionView(matrixScreen.GetFrame())
 	
 	//begin animation cycle
-	interceptor.matrixMultiFrameView.CycleFrames(
-		[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
-		[]time.Duration{time.Second*5, time.Second*5},
-		[]FrameTransition{Slide, Slide})
+	interceptor.raftStateFrame = interceptor.matrixTransitionView.AddTransition(time.Duration(time.Second*5), neopixeldisplay.Slide).Frame
+	interceptor.imageFrame = interceptor.matrixTransitionView.AddTransition(time.Duration(time.Second*5), neopixeldisplay.Slide).Frame
 
-	interceptor.networksEnabled = make([]bool,len(interceptor.networkDisplays))
-		
+	interceptor.networksEnabled = make([]bool,len(interceptor.networkScreens))
+	for i := range interceptor.networksEnabled {
+		interceptor.networksEnabled[i] = true
+	}
+
 	interceptor.s1Data = s1Data
 	interceptor.s2Data = s2Data
 	interceptor.interactiveChans = interactiveChans
 
 	if(interactiveChans != nil) {
 		interceptor.interactivePanel = NewInteractivePanel(8,8)
-		interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
-		interceptor.interactiveDisplay.Draw()
+		interceptor.interactiveScreen.GetFrame().SetRect(0,0,interceptor.interactivePanel.GetColorFrame(), neopixeldisplay.Error)
+		interceptor.interactiveScreen.Draw()
 	}
 
 	for _, ip := range peerInterceptors {
@@ -159,7 +165,7 @@ func (interceptor *Interceptor) RunDemoMode() {
 		for true {
 			time.Sleep(time.Duration(time.Duration(5+rand.Intn(5))*time.Second))
 			if interceptor.demoModeEnabled {
-				interceptor.SendStart(SetPixelCommand{rand.Intn(8),rand.Intn(8),MakeColorHue(uint32(rand.Int31n(256)))})
+				interceptor.SendStart(SetPixelCommand{rand.Intn(8),rand.Intn(8),neopixeldisplay.MakeColorHue(uint32(rand.Int31n(256)))})
 			}
 		}
 	}()
@@ -169,16 +175,17 @@ func (interceptor *Interceptor) HandleInteractive() {
 	if interceptor.s1Data != nil {
 		go func() {
 			for true {
-				enabled := (<- interceptor.s1Data) == 0
+				enabled := (<-interceptor.s1Data) == 0
 				interceptor.networksEnabled[0] = enabled
 				interceptor.raftHandlers[0].enabled = enabled
 				interceptor.raftHandlers[1].enabled = enabled
 				
 				if enabled {
-					interceptor.networkMultiAnimViews[0].SetBackgroundColor(MakeColor(0,0,0))
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
 				} else {
-					interceptor.networkMultiAnimViews[0].SetBackgroundColor(MakeColor(10,0,0))
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(10,0,0)), neopixeldisplay.Error)
 				}
+				interceptor.networkLayerViews[0].Draw()
 			}
 		}()
 	}
@@ -192,10 +199,11 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.raftHandlers[2].enabled = enabled
 				interceptor.raftHandlers[3].enabled = enabled
 				if enabled {
-					interceptor.networkMultiAnimViews[1].SetBackgroundColor(MakeColor(0,0,0))
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
 				} else {
-					interceptor.networkMultiAnimViews[1].SetBackgroundColor(MakeColor(10,0,0))
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(10,0,0)), neopixeldisplay.Error)
 				}
+				interceptor.networkLayerViews[0].Draw()
 			}
 		}()
 	}
@@ -210,8 +218,8 @@ func (interceptor *Interceptor) HandleInteractive() {
 				} else {
 					interceptor.interactivePanel.MoveRight()
 				}
-				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
-				interceptor.interactiveDisplay.Draw()
+				interceptor.interactiveScreen.GetFrame().SetRect(0,0,interceptor.interactivePanel.GetColorFrame(), neopixeldisplay.Error)
+				interceptor.interactiveScreen.Draw()
 			}
 		}()
 		go func() {
@@ -222,8 +230,8 @@ func (interceptor *Interceptor) HandleInteractive() {
 				} else {
 					interceptor.interactivePanel.MoveUp()
 				}
-				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
-				interceptor.interactiveDisplay.Draw()
+				interceptor.interactiveScreen.GetFrame().SetRect(0,0,interceptor.interactivePanel.GetColorFrame(), neopixeldisplay.Error)
+				interceptor.interactiveScreen.Draw()
 			}
 		}()
 		
@@ -235,8 +243,8 @@ func (interceptor *Interceptor) HandleInteractive() {
 				} else {
 					interceptor.interactivePanel.IncrementHue()
 				}
-				interceptor.interactiveDisplay.SetFrame(interceptor.interactivePanel.GetColorFrame())
-				interceptor.interactiveDisplay.Draw()
+				interceptor.interactiveScreen.GetFrame().SetRect(0,0,interceptor.interactivePanel.GetColorFrame(), neopixeldisplay.Error)
+				interceptor.interactiveScreen.Draw()
 			}
 		}()
 	
@@ -247,7 +255,7 @@ func (interceptor *Interceptor) HandleInteractive() {
 					interceptor.SendStart(SetPixelCommand{
 						interceptor.interactivePanel.x,
 						interceptor.interactivePanel.y,
-						MakeColorHue(interceptor.interactivePanel.hue),
+						neopixeldisplay.MakeColorHue(interceptor.interactivePanel.hue),
 					})
 				}
 			}
@@ -265,7 +273,7 @@ func (interceptor *Interceptor) HandleInteractive() {
 
 }
 
-func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, maxDuration time.Duration, color Color) {
+func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, maxDuration time.Duration, color neopixeldisplay.Color) {
 	interceptor.timeoutIndex++
 	timeoutIndex := interceptor.timeoutIndex
 	interceptor.timeoutColor = color
@@ -273,9 +281,9 @@ func (interceptor *Interceptor) BeginTimeoutAnimation(duration time.Duration, ma
 		beginIndex := int(float32(duration)/float32(maxDuration) * float32(8))
 		for i := beginIndex; i >= 0; i-- {
 			interceptor.timeoutDisplayIndex = i
-			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(8,1, MakeColor(0,0,0)), Error)
-			interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), Error)
-			interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
+			interceptor.raftStateFrame.SetRect(0, 3, neopixeldisplay.MakeColorFrame(8,1, neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
+			interceptor.raftStateFrame.SetRect(0, 3, neopixeldisplay.MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), neopixeldisplay.Error)
+			interceptor.raftStateFrame.Draw()
 			time.Sleep(maxDuration/9)
 			if timeoutIndex != interceptor.timeoutIndex {
 				return
@@ -322,68 +330,104 @@ func (interceptor *Interceptor) OnEventHandler(event raft.RaftEvent) bool {
 	case raft.SetHeartbeatTimeoutEvent:
 		interceptor.BeginTimeoutAnimation(event.Duration, event.Duration, HeartbeatTimeoutColor)
 	case raft.AppendEntriesEvent:
-		colors := MakeColorFrame(3 + len(event.Args.Entries), 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["AppendEntries"], Error)
-		for i := 0; i < len(colors[0])-3; i++ {
-			colors.Set(i,0, event.Args.Entries[i].Command.(SetPixelCommand).PixelColor, Error)
+		colors := neopixeldisplay.MakeColorFrame(3 + len(event.Args.Entries), 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["AppendEntries"], neopixeldisplay.Error)
+		for i := 0; i < colors.Width-3; i++ {
+			colors.Set(i,0, event.Args.Entries[i].Command.(SetPixelCommand).PixelColor, neopixeldisplay.Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
 	case raft.AppendEntriesResponseEvent:
-		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["AppendEntriesResponse"], Error)
+		colors := neopixeldisplay.MakeColorFrame(4, 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["AppendEntriesResponse"], neopixeldisplay.Error)
 		if event.Reply.Success {
-			colors.Set(0,0, MakeColor(0,255,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(0,255,0), neopixeldisplay.Error)
 		} else {
-			colors.Set(0,0, MakeColor(255,0,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(255,0,0), neopixeldisplay.Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
 	case raft.RequestVoteEvent:
-		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["RequestVote"], Error)
-		colors.Set(0,0, RaftIdColors[interceptor.raftId], Error)
+		colors := neopixeldisplay.MakeColorFrame(4, 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["RequestVote"], neopixeldisplay.Error)
+		colors.Set(0,0, RaftIdColors[interceptor.raftId], neopixeldisplay.Error)
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
 	case raft.RequestVoteResponseEvent:
-		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["RequestVoteResponse"], Error)
+		colors := neopixeldisplay.MakeColorFrame(4, 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["RequestVoteResponse"], neopixeldisplay.Error)
 		if event.Reply.VoteGranted {
-			colors.Set(0,0, MakeColor(0,255,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(0,255,0), neopixeldisplay.Error)
 		} else {
-			colors.Set(0,0, MakeColor(255,0,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(255,0,0), neopixeldisplay.Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
 	case raft.StartEvent:
-		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["StartEvent"], Error)
+		colors := neopixeldisplay.MakeColorFrame(4, 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["StartEvent"], neopixeldisplay.Error)
 		if command, ok := event.Args.Command.(SetPixelCommand); ok {
-			colors.Set(0,0, command.PixelColor, Error)
+			colors.Set(0,0, command.PixelColor, neopixeldisplay.Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
 	case raft.StartResponseEvent:
-		colors := MakeColorFrame(4, 1, MakeColor(255,255,255))
-		colors.Set(len(colors[0])-2, 0, RpcColors["StartEventResponse"], Error)
+		colors := neopixeldisplay.MakeColorFrame(4, 1, neopixeldisplay.MakeColor(255,255,255))
+		colors.Set(colors.Width-2, 0, RpcColors["StartEventResponse"], neopixeldisplay.Error)
 		if event.Reply.IsLeader {
-			colors.Set(0,0, MakeColor(0,255,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(0,255,0), neopixeldisplay.Error)
 		} else {
-			colors.Set(0,0, MakeColor(255,0,0), Error)
+			colors.Set(0,0, neopixeldisplay.MakeColor(255,0,0), neopixeldisplay.Error)
 		}
 
-		animation := MakeMovingSegmentAnimation(colors, interceptor.networkDisplays[event.Peer].Width, event.Outgoing)
-		go interceptor.networkMultiAnimViews[event.Peer].AddAnimation(animation, calcFps(len(animation)))
+		animation := MakeMovingSegmentAnimation(colors, interceptor.networkScreens[event.Peer].Width, event.Outgoing)
+		go func() {
+			layer := interceptor.networkAnimLayerViews[event.Peer].AddLayer(neopixeldisplay.Add)
+			animView := neopixeldisplay.NewAnimationView(layer.Frame)
+			done := animView.PlayAnimation(animation, calcFps(len(animation)), false)
+			<-done
+			interceptor.networkAnimLayerViews[event.Peer].DeleteLayer(layer)
+		}()
 
 	default:
 		fmt.Printf("Unexpected type %T\n", event)
@@ -396,44 +440,44 @@ func calcFps(frameCount int) float32 {
 }
 
 func (interceptor *Interceptor) onStateUpdated(event raft.StateUpdatedEvent) {
-	interceptor.raftStateScreen.SetAll(MakeColor(0,0,0))
+	interceptor.raftStateFrame.SetAll(neopixeldisplay.MakeColor(0,0,0))
 	//id TODO don't hardcode this
-	interceptor.raftStateScreen.SetRect(0, 0, MakeColorFrame(2, 2, RaftIdColors[interceptor.raftId]), Error)
+	interceptor.raftStateFrame.SetRect(0, 0, neopixeldisplay.MakeColorFrame(2, 2, RaftIdColors[interceptor.raftId]), neopixeldisplay.Error)
 	// voted for TODO
 	//VotedFor int
 	// received votes TODO: use id colors instead of just counting
 	for i, voted := range event.ReceivedVotes {
 		if voted {
-			interceptor.raftStateScreen.Set(2+(i%4), 1, MakeColor(255, 200, 0), Error)
+			interceptor.raftStateFrame.Set(2+(i%4), 1, neopixeldisplay.MakeColor(255, 200, 0), neopixeldisplay.Error)
 		}
 	}
 	// state
-	interceptor.raftStateScreen.SetRect(6, 0, MakeColorFrame(2, 2, StateColors[event.State]), Error)
+	interceptor.raftStateFrame.SetRect(6, 0, neopixeldisplay.MakeColorFrame(2, 2, StateColors[event.State]), neopixeldisplay.Error)
 	// logs
 	for i, log := range event.RecentLogs {
 		if setPixelCommand, ok := log.Command.(SetPixelCommand); ok {
 			color := setPixelCommand.PixelColor
 			if event.LogLength - len(event.RecentLogs) + i >= event.LastApplied {
 				//uncommitted, show at half brightness
-				color = MakeColor(color.GetRed()/2, color.GetGreen()/2, color.GetBlue()/2)
+				color = neopixeldisplay.MakeColor(color.GetRed()/2, color.GetGreen()/2, color.GetBlue()/2)
 			}
-			interceptor.raftStateScreen.SetRect(i+8-len(event.RecentLogs), 2, MakeColorFrame(1, 1, color), Error)
+			interceptor.raftStateFrame.SetRect(i+8-len(event.RecentLogs), 2, neopixeldisplay.MakeColorFrame(1, 1, color), neopixeldisplay.Error)
 		}
 	}
 	
-	interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(8,1, MakeColor(0,0,0)), Error)
-	interceptor.raftStateScreen.SetRect(0, 3, MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), Error)
+	interceptor.raftStateFrame.SetRect(0, 3, neopixeldisplay.MakeColorFrame(8,1, neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
+	interceptor.raftStateFrame.SetRect(0, 3, neopixeldisplay.MakeColorFrame(interceptor.timeoutDisplayIndex, 1, interceptor.timeoutColor), neopixeldisplay.Error)
 
 	// term
-	interceptor.raftStateScreen.SetRect(0, 5, MakeColorNumberChar(nthDigit(event.Term, 2), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
-	interceptor.raftStateScreen.SetRect(3, 5, MakeColorNumberChar(nthDigit(event.Term, 1), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
-	interceptor.raftStateScreen.SetRect(6, 5, MakeColorNumberChar(nthDigit(event.Term, 0), MakeColor(255, 255, 255), MakeColor(0, 0, 0)), Error)
-	interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.raftStateScreen)
+	interceptor.raftStateFrame.SetRect(0, 5, neopixeldisplay.MakeColorNumberChar2x3(nthDigit(event.Term, 2), neopixeldisplay.MakeColor(255, 255, 255), neopixeldisplay.MakeColor(0, 0, 0)), neopixeldisplay.Error)
+	interceptor.raftStateFrame.SetRect(3, 5, neopixeldisplay.MakeColorNumberChar2x3(nthDigit(event.Term, 1), neopixeldisplay.MakeColor(255, 255, 255), neopixeldisplay.MakeColor(0, 0, 0)), neopixeldisplay.Error)
+	interceptor.raftStateFrame.SetRect(6, 5, neopixeldisplay.MakeColorNumberChar2x3(nthDigit(event.Term, 0), neopixeldisplay.MakeColor(255, 255, 255), neopixeldisplay.MakeColor(0, 0, 0)), neopixeldisplay.Error)
+	interceptor.raftStateFrame.Draw()
 }
 
 func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent) {
-	interceptor.imageScreen.SetRect(0,0, event.State.(ColorFrame), Error)
-	interceptor.matrixMultiFrameView.UpdateFrame(&interceptor.imageScreen)
+	interceptor.imageFrame.SetRect(0,0, event.State.(neopixeldisplay.ColorFrame), neopixeldisplay.Error)
+	interceptor.imageFrame.Draw()
 	//interceptor.matrixMultiFrameView.CycleFrames(
 		//[]*ColorFrame{&interceptor.imageScreen, &interceptor.raftStateScreen},
 		//[]time.Duration{time.Second*5, time.Second*2},
@@ -441,21 +485,21 @@ func (interceptor *Interceptor) onEntryCommitted(event raft.EntryCommittedEvent)
 }
 
 // moves horizontally only
-func MakeMovingSegmentAnimation(colors ColorFrame, length int, reverseDirection bool) []ColorFrame {
-	frameCount := len(colors[0])+ length
-	frames := make([]ColorFrame, frameCount)
+func MakeMovingSegmentAnimation(colors neopixeldisplay.ColorFrame, length int, reverseDirection bool) []neopixeldisplay.ColorFrame {
+	frameCount := colors.Width + length
+	frames := make([]neopixeldisplay.ColorFrame, frameCount)
 	for frame := 0; frame < frameCount; frame++ {
-		frames[frame] = MakeColorFrame(length, 1, MakeColor(0,0,0))
-		beginIndex := frame - (len(colors[0])-1)
+		frames[frame] = neopixeldisplay.MakeColorFrame(length, 1, neopixeldisplay.MakeColor(0,0,0))
+		beginIndex := frame - (colors.Width-1)
 		if reverseDirection {
 			beginIndex = length-1 - frame
 		}
-		for i := range colors[0] {
-			color := colors[0][i]
+		for i := 0; i < colors.Width; i++ {
+			color := colors.Get(i, 0, neopixeldisplay.Error)
 			if reverseDirection {
-				color = colors[0][len(colors[0])-1-i]
+				color = colors.Get(colors.Width-1-i, 0, neopixeldisplay.Error)
 			}
-			frames[frame].Set(beginIndex+i,0, color, Clip)
+			frames[frame].Set(beginIndex+i,0, color, neopixeldisplay.Clip)
 		}
 	}
 	return frames
@@ -484,7 +528,7 @@ func NewRaftHandler(interceptor *Interceptor, listenPort int, forwardAddress str
 	rh.interceptor = interceptor
 	rh.peer = peer
 	rh.outgoing = outgoing
-	rh.enabled = false
+	rh.enabled = true
 	rh.rpcServer = rpc.NewServer()
 	rh.rpcServer.RegisterName("Raft", &rh)
 
@@ -507,10 +551,10 @@ func (rh *RaftHandler) GetForwardClient() *raft.UnreliableRpcClient {
 /*** RAFT RPCs **/
 func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.RequestVoteReply) error {
 	rh.interceptor.OnEventHandler(raft.RequestVoteEvent{args, rh.peer, rh.outgoing})
+	time.Sleep(NetworkForwardDelay)
 	if !rh.enabled {
 		return errors.New("RPC Dropped")
 	}
-	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.RequestVote", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.RequestVoteResponseEvent{*reply, rh.peer, !rh.outgoing})
@@ -521,10 +565,10 @@ func (rh *RaftHandler) RequestVote(args raft.RequestVoteArgs, reply *raft.Reques
 
 func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.AppendEntriesReply) error {
 	rh.interceptor.OnEventHandler(raft.AppendEntriesEvent{args, rh.peer, rh.outgoing})
+	time.Sleep(NetworkForwardDelay)
 	if !rh.enabled {
 		return errors.New("RPC Dropped")
 	}
-	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.AppendEntries", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.AppendEntriesResponseEvent{*reply, rh.peer, !rh.outgoing})
@@ -535,10 +579,10 @@ func (rh *RaftHandler) AppendEntries(args raft.AppendEntriesArgs, reply *raft.Ap
 
 func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error {
 	rh.interceptor.OnEventHandler(raft.StartEvent{args, rh.peer, rh.outgoing})
+	time.Sleep(NetworkForwardDelay)
 	if !rh.enabled {
 		return errors.New("RPC Dropped")
 	}
-	time.Sleep(NetworkForwardDelay)
 	success := rh.forwardClient.Call("Raft.Start", args, reply)
 	if success {
 		rh.interceptor.OnEventHandler(raft.StartResponseEvent{*reply, rh.peer, !rh.outgoing})
@@ -549,5 +593,5 @@ func (rh *RaftHandler) Start(args raft.StartArgs, reply *raft.StartReply) error 
 
 func init() {
 	gob.Register(SetPixelCommand{})
-	gob.Register(MakeColorFrame(0,0,0))
+	gob.Register(neopixeldisplay.MakeColorFrame(0,0,0))
 }

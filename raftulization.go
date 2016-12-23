@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fresh4less/raftulization/raft"
+	"github.com/fresh4less/neopixel-display/neopixeldisplay"
 	"github.com/fresh4less/raftulization/switchIO"
 	"github.com/fresh4less/raftulization/rotaryEncoderIO"
 	"log"
@@ -96,14 +97,14 @@ func doRaft() {
 
 	eventClient := raft.NewUnreliableRpcClient(*eventAddress, 5, time.Second)
 
-	colorState := MakeColorFrame(8,8,MakeColor(0,0,0))
+	colorState := neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(0,0,0))
 
 	for true {
 		select {
 		case applyMsg := <-applyCh:
 			go func() {
 				if command, ok := applyMsg.Command.(SetPixelCommand); ok {
-					colorState[command.Y][command.X] = command.PixelColor
+					colorState.Set(command.X, command.Y, command.PixelColor, neopixeldisplay.Error)
 					eventCh <- raft.EntryCommittedEvent{applyMsg, colorState}
 				}
 			}()
@@ -145,7 +146,7 @@ func doIntercept() {
 	interceptFlagSet := flag.NewFlagSet("", flag.ExitOnError)
 	eventListenPort := interceptFlagSet.Int("e", 10000, "Event listen port")
 	sourceAddress := interceptFlagSet.String("s", "127.0.0.1:8000", "RAFT source address")
-	pixelsEnabled := interceptFlagSet.Bool("p", false, "Enable pixel displays")
+	displayMode := interceptFlagSet.String("d", "none", "Display mode (neopixel, console, none)")
 	pixelBrightness := interceptFlagSet.Float64("b", 1.0, "Pixel brightness (requires -p=true)")
 	isInteractive := interceptFlagSet.Bool("i", false, "Set for interactive mode (requires -p=true)")
 	s1Pin := interceptFlagSet.Int("s1", -1, "Set the pin for the outer line switch.")
@@ -172,21 +173,27 @@ func doIntercept() {
 
 	interceptFlagSet.Parse(os.Args[2:])
 
-	var neopixelDisplay PixelDisplay
+	var neopixelDisplay neopixeldisplay.PixelDisplay
 	
 	var s1Data chan int
 	var s2Data chan int
 	
-	if *pixelsEnabled {
+	if *displayMode == "neopixel" {
 		s1Data = switchIO.NewSwitchIO(*s1Pin)
 		s2Data = switchIO.NewSwitchIO(*s2Pin)
 		if *isInteractive {
-			neopixelDisplay = NewNeopixelDisplay(18, 64+30+20+64, 255)
+			neopixelDisplay = neopixeldisplay.NewNeopixelDisplay(18, 64+30+20+64, 255)
 		} else {
-			neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
+			neopixelDisplay = neopixeldisplay.NewNeopixelDisplay(18, 64+30+20, 255)
+		}
+	} else if *displayMode == "console" {
+		if *isInteractive {
+			neopixelDisplay = neopixeldisplay.NewConsoleColorDisplay(64+30+20+64, [][]int{[]int{8,8},[]int{30,1},[]int{20,1},[]int{8,8}})
+		} else {
+			neopixelDisplay = neopixeldisplay.NewConsoleColorDisplay(64+30+20, [][]int{[]int{8,8},[]int{30,1},[]int{20,1}})
 		}
 	} else {
-		neopixelDisplay = &FakeDisplay{64 + 30 + 20}
+		neopixelDisplay = neopixeldisplay.NewFakeDisplay(64 + 30 + 20 + 64)
 	}
 
 	if len(forwardInfo) < 2 {
@@ -195,14 +202,14 @@ func doIntercept() {
 
 	brightness := float32(*pixelBrightness)
 
-	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, brightness, false)
-	networkDisplays := []*PixelDisplayView{
-		NewPixelDisplayView(neopixelDisplay, 64, 30, 1, brightness, false),
-		NewPixelDisplayView(neopixelDisplay, 64+30, 20, 1, brightness, false),
+	matrixDisplay := neopixeldisplay.NewScreenView(neopixelDisplay, 0, 8, 8, brightness, neopixeldisplay.Error)
+	networkDisplays := []*neopixeldisplay.ScreenView{
+		neopixeldisplay.NewScreenView(neopixelDisplay, 64, 30, 1, brightness, neopixeldisplay.Error),
+		neopixeldisplay.NewScreenView(neopixelDisplay, 64+30, 20, 1, brightness, neopixeldisplay.Error),
 	}
-	var interactiveDisplay *PixelDisplayView
+	var interactiveDisplay *neopixeldisplay.ScreenView
 
-	var interactiveChans *InteractiveChannels	
+	var interactiveChans *InteractiveChannels
 	
 	if *isInteractive {
 		interactiveChans = &InteractiveChannels {
@@ -214,7 +221,7 @@ func doIntercept() {
 			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryM1Pin,*rotaryM2Pin),
 			rotaryEncoderIO.NewRotaryEncoderIO(*rotaryR1Pin,*rotaryR2Pin),
 		}
-		interactiveDisplay = NewPixelDisplayView(neopixelDisplay, 64+30+20, 8,8, brightness, false)
+		interactiveDisplay = neopixeldisplay.NewScreenView(neopixelDisplay, 64+30+20, 8,8, brightness, neopixeldisplay.Error)
 	}
 
 	NewInterceptor(*eventListenPort, *sourceAddress, forwardInfo, matrixDisplay, networkDisplays, interactiveDisplay, s1Data, s2Data, interactiveChans, peerInterceptors, *raftId)
@@ -225,64 +232,75 @@ func doIntercept() {
 func doLedTest() {
 	ledTestFlagSet := flag.NewFlagSet("", flag.ExitOnError)
 	pixelBrightness := ledTestFlagSet.Float64("b", 1.0, "Pixel brightness")
-	var neopixelDisplay PixelDisplay
-	neopixelDisplay = NewNeopixelDisplay(18, 64+30+20, 255)
 	ledTestFlagSet.Parse(os.Args[2:])
 
-	colors := []Color{
-		MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
-		MakeColor(0, uint32(*pixelBrightness*float64(255)), 0),
-		MakeColor(0, 0, uint32(*pixelBrightness*float64(255))),
+	display := neopixeldisplay.NewNeopixelDisplay(18, 64+30+20, 255)
+	matrixScreen := neopixeldisplay.NewScreenView(display, 0, 8, 8, float32(*pixelBrightness), neopixeldisplay.Error)
+	matrixTransitionView := neopixeldisplay.NewTransitionView(matrixScreen.GetFrame())
+	transition1 := matrixTransitionView.AddTransition(time.Second, neopixeldisplay.Slide)
+	transition2 := matrixTransitionView.AddTransition(time.Second, neopixeldisplay.Slide)
+	transition3 := matrixTransitionView.AddTransition(time.Second*3, neopixeldisplay.Slide)
+	transition1.Frame.SetRect(0, 0, neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColor(255, 0, 0)), neopixeldisplay.Error)
+	transition2.Frame.SetRect(0, 0, neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColor(0, 255, 0)), neopixeldisplay.Error)
+	transition3.Frame.SetRect(0, 0, neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColor(0, 0, 255)), neopixeldisplay.Error)
+
+	layerView := neopixeldisplay.NewLayerView(transition2.Frame)
+	layer1 := layerView.AddLayer(neopixeldisplay.Add)
+	layer1.Frame.SetRect(0, 0, neopixeldisplay.MakeColorFrame(7, 7, neopixeldisplay.MakeColor(255, 0, 0)), neopixeldisplay.Error)
+	layer2 := layerView.AddLayer(neopixeldisplay.Add)
+	layer2.Frame.SetRect(2, 2, neopixeldisplay.MakeColorFrame(5, 5, neopixeldisplay.MakeColor(0, 255, 0)), neopixeldisplay.Error)
+	layer3 := layerView.AddLayer(neopixeldisplay.Overwrite)
+	layer3.Frame.SetRect(4, 4, neopixeldisplay.MakeColorFrame(3, 3, neopixeldisplay.MakeColor(0, 0, 255)), neopixeldisplay.Error)
+	layer4 := layerView.AddLayer(neopixeldisplay.SetWhite)
+	layer4.Frame.SetRect(6, 6, neopixeldisplay.MakeColorFrame(2, 2, neopixeldisplay.MakeColor(100, 100, 100)), neopixeldisplay.Error)
+
+	animationView := neopixeldisplay.NewAnimationView(transition3.Frame)
+	animationView.PlayAnimation(
+		[]neopixeldisplay.ColorFrame{
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(0)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(30)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(60)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(90)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(120)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(150)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(180)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(210)),
+			neopixeldisplay.MakeColorFrame(8, 8, neopixeldisplay.MakeColorHue(240)),
+		},
+		10, true)
+
+	stripColors := []neopixeldisplay.Color{
+		neopixeldisplay.MakeColor(uint32(*pixelBrightness*float64(255)),0,0),
+		neopixeldisplay.MakeColor(0, uint32(*pixelBrightness*float64(255)), 0),
+		neopixeldisplay.MakeColor(0, 0, uint32(*pixelBrightness*float64(255))),
 	}
 
-	matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 8, 8, float32(*pixelBrightness), false)
-	multiDisplay := NewMultiFrameView(matrixDisplay)
-	screens := make([]ColorFrame, 2)
-	screens[0] = MakeColorFrame(8,8, MakeColor(0,0,0))
-	screens[1] = MakeColorFrame(8,8, MakeColor(255,255,255))
-	//screens[2] = MakeColorFrame(8,8, MakeColor(255,0,0))
-
-	multiDisplay.CycleFrames(
-		[]*ColorFrame{&screens[0],&screens[1]},
-		[]time.Duration{time.Second*5, time.Second*5},
-		[]FrameTransition{Slide, Slide})
-
-	stripDisplay := NewPixelDisplayView(neopixelDisplay, 0, 30, 1, float32(*pixelBrightness), false)
-	multiAnimView := NewMultiAnimationView(stripDisplay, Add, Error)
+	strip1Screen := neopixeldisplay.NewScreenView(display, 64, 30, 1, float32(*pixelBrightness), neopixeldisplay.Error)
+	strip2Screen := neopixeldisplay.NewScreenView(display, 64+30, 20, 1, float32(*pixelBrightness), neopixeldisplay.Error)
 
 	t := 0
 	for true {
-		screens[t%len(screens)].SetRect(0,0, MakeColorNumberChar(t%10, MakeColor(255,0,0), MakeColor(0,0,0)), Error)
-		multiDisplay.UpdateFrame(&screens[t%len(screens)])
-		//for i := 0; i < 64; i++ {
-			//neopixelDisplay.Set(i, colors[t%3])
-		//}
-		multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width, t%2==0), float32(30/((t%4)+1)))
+		transition1.Frame.SetRect(0,0, neopixeldisplay.MakeColorNumberChar2x3(t%10, neopixeldisplay.MakeColor(255,0,0), neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
+		transition1.Frame.Draw()
+
+		//multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width, t%2==0), float32(30/((t%4)+1)))
 		//multiAnimView.AddAnimation(MakeMovingSegmentAnimation(MakeColorFrame(5, 1, colors[t%3]), stripDisplay.Width, t%2==0), 60)
+		strip1Screen.GetFrame().SetRect(0,0,neopixeldisplay.MakeColorFrame(strip1Screen.Width, strip1Screen.Height, stripColors[t%3]), neopixeldisplay.Error)
+		strip1Screen.Draw()
+		strip2Screen.GetFrame().SetRect(0,0,neopixeldisplay.MakeColorFrame(strip2Screen.Width, strip2Screen.Height, stripColors[(t+1)%3]), neopixeldisplay.Error)
+		strip2Screen.Draw()
 		//for i := 64; i < 64+30; i++ {
 			//neopixelDisplay.Set(i, colors[(t+1)%3])
 		//}
-		for i := 64+30; i < 64+30+20; i++ {
-			neopixelDisplay.Set(i, colors[(t+2)%3])
-		}
-		neopixelDisplay.Show()
+		//for i := 64+30; i < 64+30+20; i++ {
+			//neopixelDisplay.Set(i, colors[(t+2)%3])
+		//}
+		//neopixelDisplay.Show()
 		time.Sleep(1*time.Second)
 		t++
 	}
 
-	//neopixelDisplay := &FakeDisplay{30}
-	//matrixDisplay := NewPixelDisplayView(neopixelDisplay, 0, 30, 1, false)
-
-	//colors := MakeColorFrame(5,1, MakeColor(0,0,0))
-	//colors[0][len(colors[0])-1] = MakeColor(255,0,0)
-	//for i := 0; i < len(colors[0])-1; i++ {
-		//colors[0][i] = MakeColor(0,255,0)
-	//}
-
-	//animation := MakeMovingSegmentAnimation(colors, neopixelDisplay.Count())
-	////fmt.Printf("%v\n", animation[1])
-
-	//matrixDisplay.DrawAnimation(0,0,animation, calcFps(len(animation)))
+	select {}
 }
 
 /*
@@ -327,7 +345,7 @@ local testing version (instead of different Ips, different different 800x digit
 .\raftulization.exe raft -s 8082 -c 127.0.0.1:8080,127.0.0.1:8081,127.0.0.1:8083 -f r3.state
 .\raftulization.exe raft -s 8083 -c 127.0.0.1:8080,127.0.0.1:8081,127.0.0.1:8082 -f r4.state
 
-.\raftulization.exe intercept -e 10001 -s 127.0.0.1:8001 -f 9012~9021~127.0.0.1:8002
+.\raftulization.exe intercept -e 10001 -s 127.0.0.1:8001 -f 9012~9021~127.0.0.1:8002 -d console
 .\raftulization.exe raft -s 8001 -e 127.0.0.1:10001 -c 127.0.0.1:9012 -f r1.state
 
 .\raftulization.exe raft -s 8002 -c 127.0.0.1:9021 -f r2.state
