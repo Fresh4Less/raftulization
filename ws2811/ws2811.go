@@ -1,4 +1,4 @@
-// +build pixelsupport
+// +build !noled
 
 // Copyright (c) 2015, Jacques Supcik, HEIA-FR
 // All rights reserved.

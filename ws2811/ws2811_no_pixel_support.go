@@ -1,4 +1,4 @@
-// +build !pixelsupport
+// +build noled
 
 package ws2811
 import (

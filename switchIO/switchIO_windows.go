@@ -1,4 +1,4 @@
-// +build !pixelsupport
+// +build norpio
 
 package switchIO
 
