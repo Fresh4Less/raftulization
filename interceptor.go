@@ -25,9 +25,9 @@ const NetworkForwardDelay = time.Millisecond * 1100
 
 //colors
 var StateColors = map[raft.ServerState]neopixeldisplay.Color{
-	raft.Follower:  neopixeldisplay.MakeColor(0, 0, 255),
+	raft.Follower:  neopixeldisplay.MakeColor(255, 0, 0),
 	raft.Candidate: neopixeldisplay.MakeColor(0, 255, 0),
-	raft.Leader:    neopixeldisplay.MakeColor(255, 0, 0),
+	raft.Leader:    neopixeldisplay.MakeColor(0, 0, 255),
 }
 
 var RpcColors = map[string]neopixeldisplay.Color {
@@ -181,9 +181,9 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.raftHandlers[1].enabled = enabled
 				
 				if enabled {
-					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(30,1,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
 				} else {
-					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(10,0,0)), neopixeldisplay.Error)
+					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(30,1,neopixeldisplay.MakeColor(0,0,10)), neopixeldisplay.Error)
 				}
 				interceptor.networkLayerViews[0].Draw()
 			}
@@ -199,11 +199,11 @@ func (interceptor *Interceptor) HandleInteractive() {
 				interceptor.raftHandlers[2].enabled = enabled
 				interceptor.raftHandlers[3].enabled = enabled
 				if enabled {
-					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
+					interceptor.networkLayerViews[1].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(20,1,neopixeldisplay.MakeColor(0,0,0)), neopixeldisplay.Error)
 				} else {
-					interceptor.networkLayerViews[0].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(8,8,neopixeldisplay.MakeColor(10,0,0)), neopixeldisplay.Error)
+					interceptor.networkLayerViews[1].GetLayer(0).Frame.SetRect(0,0,neopixeldisplay.MakeColorFrame(20,1,neopixeldisplay.MakeColor(0,0,10)), neopixeldisplay.Error)
 				}
-				interceptor.networkLayerViews[0].Draw()
+				interceptor.networkLayerViews[1].Draw()
 			}
 		}()
 	}
